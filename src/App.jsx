@@ -88,6 +88,8 @@ export default function App() {
     speechTTS.stop();
 
     try {
+      console.log('🎙️ Captured audio blob:', audioBlob.size, 'bytes, type:', audioBlob.type);
+
       // Step 1: AI Speech-to-Text via Whisper Large v3 Turbo
       const transcript = await transcribeWithGroqWhisper(
         effectiveGroqKey, 
@@ -95,17 +97,19 @@ export default function App() {
         currentLanguage
       );
 
+      console.log('📝 Whisper Transcription:', transcript);
+
       if (!transcript || transcript.trim().length === 0) {
         throw new Error('No intelligible speech detected. Please speak closer to the microphone.');
       }
 
       setCurrentTranscript(transcript);
 
-      // Step 2: AI Parsing via Llama 3.3 70B
+      // Step 2: AI Parsing via Groq AI
       await executeAIParser(transcript);
     } catch (err) {
       console.error('Audio processing error:', err);
-      alert(err.message || 'Error processing audio via AI');
+      alert('Voice Error: ' + (err.message || 'Error processing audio via AI'));
     } finally {
       setIsProcessing(false);
     }

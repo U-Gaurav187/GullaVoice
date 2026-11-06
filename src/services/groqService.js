@@ -46,10 +46,10 @@ Respond ONLY with valid JSON conforming strictly to this schema:
 }`;
 
 const CANDIDATE_CHAT_MODELS = [
-  'llama-3.3-70b-versatile',
   'openai/gpt-oss-120b',
   'openai/gpt-oss-20b',
-  'qwen/qwen3.8-27b'
+  'qwen/qwen3.8-27b',
+  'llama-3.3-70b-versatile'
 ];
 
 /**
@@ -68,10 +68,8 @@ export async function transcribeWithGroqWhisper(apiKey, audioBlob, language = 'h
       const formData = new FormData();
       formData.append('file', audioBlob, 'counter_recording.webm');
       formData.append('model', model);
-      formData.append('prompt', 'Kirana shop, Ramesh bhai, Sunita bhabhi, cheeni, tel, dudh, chawal, atta, dal, udhaar, jama, khata, rupaye, kilo, packet');
-      if (language === 'hi') {
-        formData.append('language', 'hi');
-      }
+      // Natural language auto-detection: allows seamless Hinglish, Hindi, and English counter speech
+      formData.append('prompt', 'Kirana ledger, Ramesh bhai, Sunita bhabhi, Sharma ji, cheeni, tel, dudh, chawal, atta, dal, udhaar, jama, khata, rupaye, kilo, packet');
 
       const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
         method: 'POST',
