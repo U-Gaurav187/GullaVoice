@@ -233,6 +233,39 @@ export default function GallaVoiceController({
         </div>
       )}
 
+      {/* Quick 1-Click Demo Voice Chips */}
+      <div className="w-full mb-3">
+        <span className="text-[10px] uppercase font-bold text-stone-400 block mb-1.5 tracking-wider">
+          {language === 'hi' ? 'तुरंत टेस्ट करें (1-Click Test Chips):' : 'Try Demo Voice Commands:'}
+        </span>
+        <div className="flex flex-wrap gap-1.5 justify-center">
+          <button
+            type="button"
+            onClick={() => onManualTextSubmit('Ramesh bhai ko do kilo cheeni aur ek tel udhaar likh do')}
+            disabled={isProcessing}
+            className="px-2.5 py-1 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-900 border border-orange-200 text-xs font-semibold cursor-pointer transition-colors"
+          >
+            🛒 रमेश: 2kg चीनी + 1 तेल
+          </button>
+          <button
+            type="button"
+            onClick={() => onManualTextSubmit('Sunita bhabhi 500 rupaye jama')}
+            disabled={isProcessing}
+            className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 text-xs font-semibold cursor-pointer transition-colors"
+          >
+            💰 सुनीता: ₹500 जमा
+          </button>
+          <button
+            type="button"
+            onClick={() => onManualTextSubmit('Sharma ji ko 1 kilo atta udhaar likh do')}
+            disabled={isProcessing}
+            className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-semibold cursor-pointer transition-colors"
+          >
+            🌾 शर्मा जी: 1kg आटा
+          </button>
+        </div>
+      </div>
+
       {/* RECOGNIZED TRANSCRIPT & NOISE BADGE */}
       {currentTranscript && (
         <div className="w-full mt-2 p-4 rounded-2xl bg-stone-50 border border-stone-200 text-left space-y-2">

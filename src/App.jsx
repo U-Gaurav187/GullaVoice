@@ -157,18 +157,33 @@ export default function App() {
       parsedResult = parseKiranaVoiceLocally(transcriptText, customers, rateCard);
     }
 
+    const isNoiseOnly = parsedResult.intent === 'NOISE_ONLY' || 
+      ((!parsedResult.items || parsedResult.items.length === 0) && Number(parsedResult.total_amount_inr) === 0);
+
     setFilteredNoise(parsedResult.ignored_side_chatter || '');
-    setStagedDraft(parsedResult);
 
-    // Step 3: Read back aloud in chosen language (Hindi or English)
-    const readbackSentence = currentLanguage === 'hi'
-      ? (parsedResult.tts_hindi_readback || parsedResult.tts_readback)
-      : (parsedResult.tts_readback || parsedResult.tts_hindi_readback);
+    if (isNoiseOnly) {
+      setStagedDraft(null);
+      const advice = currentLanguage === 'hi'
+        ? 'कोई खाता लेनदेन नहीं मिला। कृपया ग्राहक और सामान का नाम बोलें (जैसे: "रमेश भाई को दो किलो चीनी उधार")।'
+        : 'No ledger transaction detected. Please speak customer name and items (e.g. "Ramesh bhai 2kg sugar credit").';
+      
+      if (settings.autoReadback) {
+        speechTTS.speak(advice, currentLanguage);
+      }
+    } else {
+      setStagedDraft(parsedResult);
 
-    if (settings.autoReadback && readbackSentence) {
-      setTimeout(() => {
-        speechTTS.speak(readbackSentence, currentLanguage);
-      }, 250);
+      // Read back aloud in chosen language (Hindi or English)
+      const readbackSentence = currentLanguage === 'hi'
+        ? (parsedResult.tts_hindi_readback || parsedResult.tts_readback)
+        : (parsedResult.tts_readback || parsedResult.tts_hindi_readback);
+
+      if (settings.autoReadback && readbackSentence) {
+        setTimeout(() => {
+          speechTTS.speak(readbackSentence, currentLanguage);
+        }, 250);
+      }
     }
   };
 
