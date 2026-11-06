@@ -142,8 +142,24 @@ export default function App() {
   const executeAIParser = async (transcriptText) => {
     let parsedResult = null;
 
-    // 1. Try Google Gemini Flash if key is present
-    if (effectiveGeminiKey) {
+    // 1. High-Speed Groq Engine (Llama / GPT-OSS 120B) - Sub-second turnaround (~1.1s)
+    if (effectiveGroqKey) {
+      try {
+        console.log('⚡ Processing via Groq Turbo AI Engine...');
+        parsedResult = await parseWithGroqLlama({
+          apiKey: effectiveGroqKey,
+          transcript: transcriptText,
+          customers,
+          rateCard,
+          language: currentLanguage
+        });
+      } catch (err) {
+        console.warn('Groq parsing failed, trying Gemini Flash:', err.message);
+      }
+    }
+
+    // 2. Google Gemini 3.5 Flash if Groq was unavailable or failed
+    if (!parsedResult && effectiveGeminiKey) {
       try {
         console.log('⚡ Processing via Google Gemini 3.5 Flash...');
         parsedResult = await parseWithGeminiFlash({
@@ -154,28 +170,13 @@ export default function App() {
           language: currentLanguage
         });
       } catch (err) {
-        console.warn('Gemini parsing error, trying Groq:', err.message);
-      }
-    }
-
-    // 2. Try Groq if Gemini wasn't used or failed
-    if (!parsedResult && effectiveGroqKey) {
-      try {
-        console.log('⚡ Processing via Groq AI...');
-        parsedResult = await parseWithGroqLlama({
-          apiKey: effectiveGroqKey,
-          transcript: transcriptText,
-          customers,
-          rateCard,
-          language: currentLanguage
-        });
-      } catch (err) {
-        console.warn('Groq failed, falling back to local engine:', err.message);
+        console.warn('Gemini parsing error:', err.message);
       }
     }
 
     // 3. Fallback to Local Deterministic Engine
     if (!parsedResult) {
+      console.log('⚡ Falling back to zero-key local deterministic parser...');
       parsedResult = parseKiranaVoiceLocally(transcriptText, customers, rateCard);
     }
 

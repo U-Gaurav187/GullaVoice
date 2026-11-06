@@ -5,14 +5,14 @@ import {
   Volume2, 
   Sparkles, 
   Filter, 
-  AlertCircle, 
   RefreshCw, 
-  Clock, 
   Languages, 
   Send,
+  Play,
   SlidersHorizontal,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Info
 } from 'lucide-react';
 import { audioRecorder } from '../utils/audioRecorder.js';
 import { NOISY_GALLA_PRESETS } from '../data/noisyGallaPresets.js';
@@ -33,8 +33,17 @@ export default function GallaVoiceController({
   const [statusMessage, setStatusMessage] = useState('');
   const [showSimulateDrawer, setShowSimulateDrawer] = useState(false);
   const [typedInput, setTypedInput] = useState('');
+  const [audioPreviewUrl, setAudioPreviewUrl] = useState(null);
+  const [lastAudioStats, setLastAudioStats] = useState(null);
+
   const timerRef = useRef(null);
-  const holdStartTimeRef = useRef(0);
+  const audioPlayerRef = useRef(null);
+  const isRecordingRef = useRef(false);
+  const pressStartTimeRef = useRef(0);
+  const sessionStartTimeRef = useRef(0);
+  const isHoldingRef = useRef(false);
+
+  isRecordingRef.current = isRecording;
 
   // Live timer while recording
   useEffect(() => {
@@ -58,54 +67,102 @@ export default function GallaVoiceController({
   };
 
   const startRecordingSession = async () => {
-    if (isProcessing) return;
+    if (isProcessing || isRecordingRef.current) return;
     setStatusMessage('');
-    holdStartTimeRef.current = Date.now();
+    setAudioPreviewUrl(null);
+    sessionStartTimeRef.current = Date.now();
+
     try {
       await audioRecorder.start((volume) => {
         setMicVolume(volume);
       });
       setIsRecording(true);
       setStatusMessage(language === 'hi' 
-        ? '🎙️ सुन रहे हैं... (दुकान की भाषा में बोलें, पूरा होने पर बटन दबाएं)' 
-        : '🎙️ Listening... (Speak naturally, tap when done)');
+        ? '🎙️ सुन रहे हैं... (बोलते रहें, पूरा होने पर छोड़ें या दोबारा टैप करें)' 
+        : '🎙️ Listening... (Speak naturally, release or tap again when finished)');
     } catch (err) {
       console.error('Mic start error:', err);
-      setStatusMessage(err.message || 'Microphone access failed. Please allow mic in browser.');
+      setIsRecording(false);
+      setStatusMessage(err.message || 'Microphone access failed. Please allow microphone in browser.');
     }
   };
 
   const stopRecordingSession = async () => {
-    if (!isRecording) return;
+    if (!isRecordingRef.current) return;
     setIsRecording(false);
     setStatusMessage(language === 'hi' 
       ? '⚡ Whisper AI आवाज़ को समझ रहा है...' 
       : '⚡ Whisper AI transcribing audio...');
+
     try {
-      const audioBlob = await audioRecorder.stop();
-      if (audioBlob && audioBlob.size > 200) {
-        onAudioRecorded(audioBlob);
-      } else {
-        setStatusMessage(language === 'hi' 
-          ? '⚠️ कोई आवाज़ सुनाई नहीं दी। कृपया माइक के पास बोलें।' 
-          : '⚠️ No sound heard. Please speak closer to microphone.');
+      const result = await audioRecorder.stop();
+      if (!result || !result.blob) {
+        setStatusMessage('Recording was empty.');
+        return;
       }
+
+      console.log(`🎙️ Captured WAV Audio: ${result.durationMs}ms, ${result.sizeBytes} bytes, ${result.mimeType}`);
+
+      // Minimum audio duration check (at least 700ms and 15KB)
+      if (result.durationMs < 700 || result.sizeBytes < 15000) {
+        setStatusMessage(language === 'hi' 
+          ? '⚠️ बहुत जल्दी बंद हो गया (< 1 सेकंड)। कृपया माइक दबाकर पूरा वाक्य बोलें।' 
+          : '⚠️ Too short (< 1s). Please hold mic and speak full sentence.');
+        return;
+      }
+
+      // Create audio preview URL so user can listen to what mic recorded
+      const preview = URL.createObjectURL(result.blob);
+      setAudioPreviewUrl(preview);
+      setLastAudioStats({ durationMs: result.durationMs, sizeBytes: result.sizeBytes });
+
+      // Pass high-fidelity WAV blob to AI pipeline
+      onAudioRecorded(result.blob);
     } catch (err) {
       console.error('Stop error:', err);
       setStatusMessage(err.message || 'Failed to capture audio.');
     }
   };
 
-  // Toggle for click / tap
-  const handleToggle = () => {
-    if (isRecording) {
-      stopRecordingSession();
-    } else {
+  // Dual Interaction Handlers: Push-to-Talk (Hold & Release) + Tap-to-Toggle
+  const handlePointerDown = (e) => {
+    if (isProcessing) return;
+    pressStartTimeRef.current = Date.now();
+    isHoldingRef.current = true;
+
+    if (!isRecordingRef.current) {
       startRecordingSession();
     }
   };
 
-  // Manual text submit
+  const handlePointerUp = (e) => {
+    if (isProcessing) return;
+    const holdDuration = Date.now() - pressStartTimeRef.current;
+    isHoldingRef.current = false;
+
+    if (isRecordingRef.current) {
+      // If held for > 400ms, it was a Push-to-Talk hold -> stop on release!
+      if (holdDuration > 400) {
+        stopRecordingSession();
+      } 
+      // If tapped and session has run for > 600ms, second tap stops hands-free recording!
+      else if (Date.now() - sessionStartTimeRef.current > 600) {
+        stopRecordingSession();
+      }
+    }
+  };
+
+  const handlePlayRecordedAudio = () => {
+    if (audioPreviewUrl) {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+      }
+      const player = new Audio(audioPreviewUrl);
+      audioPlayerRef.current = player;
+      player.play().catch(e => console.warn('Audio playback failed:', e));
+    }
+  };
+
   const handleFormSubmit = (e) => {
     e.preventDefault();
     if (!typedInput.trim() || isProcessing) return;
@@ -156,8 +213,8 @@ export default function GallaVoiceController({
         </div>
       )}
 
-      {/* THE CENTRAL GIANT MINIMALIST MIC BUTTON */}
-      <div className="relative my-5 flex flex-col items-center justify-center">
+      {/* THE CENTRAL GIANT MINIMALIST MIC BUTTON (Dual-Mode: Hold or Tap) */}
+      <div className="relative my-4 flex flex-col items-center justify-center">
         {/* Pulsing visualizer ring during recording */}
         {isRecording && (
           <div 
@@ -170,14 +227,18 @@ export default function GallaVoiceController({
         )}
 
         <button
-          onClick={handleToggle}
+          type="button"
+          onMouseDown={handlePointerDown}
+          onMouseUp={handlePointerUp}
+          onTouchStart={handlePointerDown}
+          onTouchEnd={handlePointerUp}
           disabled={isProcessing}
-          className={`relative z-10 w-32 h-32 rounded-full flex flex-col items-center justify-center text-white shadow-2xl transition-all duration-150 active:scale-95 cursor-pointer select-none ${
+          className={`relative z-10 w-32 h-32 rounded-full flex flex-col items-center justify-center text-white shadow-2xl transition-all duration-150 active:scale-95 cursor-pointer select-none touch-none ${
             isRecording
               ? 'bg-gradient-to-tr from-red-600 to-rose-500 shadow-red-500/40 ring-8 ring-red-100 animate-pulse'
               : 'bg-gradient-to-tr from-orange-500 via-amber-600 to-orange-600 hover:shadow-orange-500/40 ring-8 ring-orange-100 hover:ring-orange-200'
           }`}
-          title={isRecording ? 'रिकॉर्डिंग समाप्त करें (Tap to finish)' : 'बोलने के लिए टैप करें (Tap to speak)'}
+          title={isRecording ? 'छोड़ें या टैप करें' : 'दबाकर रखें या टैप करें'}
         >
           {isRecording ? (
             <>
@@ -197,31 +258,36 @@ export default function GallaVoiceController({
             <>
               <Mic className="w-12 h-12" />
               <span className="text-xs font-black tracking-wider mt-1.5 uppercase">
-                {language === 'hi' ? 'बोलें (TAP)' : 'SPEAK'}
+                {language === 'hi' ? 'बोलें (HOLD/TAP)' : 'SPEAK'}
               </span>
             </>
           )}
         </button>
 
-        {/* Dynamic Decibel Waveform while recording */}
+        {/* Dynamic Waveform & Helpful Guidance */}
         {isRecording ? (
-          <div className="flex items-center justify-center gap-1.5 mt-4 h-8">
-            {[20, 45, 80, 60, 95, 40, 75, 30, 90, 50, 25].map((factor, i) => {
-              const h = Math.max(6, Math.min(36, Math.round((micVolume / 100) * factor)));
-              return (
-                <span
-                  key={i}
-                  className="w-1.5 bg-red-500 rounded-full transition-all duration-75"
-                  style={{ height: `${h}px` }}
-                ></span>
-              );
-            })}
+          <div className="flex flex-col items-center mt-3">
+            <div className="flex items-center justify-center gap-1.5 h-8">
+              {[20, 45, 80, 60, 95, 40, 75, 30, 90, 50, 25].map((factor, i) => {
+                const h = Math.max(6, Math.min(36, Math.round((micVolume / 100) * factor)));
+                return (
+                  <span
+                    key={i}
+                    className="w-1.5 bg-red-500 rounded-full transition-all duration-75"
+                    style={{ height: `${h}px` }}
+                  ></span>
+                );
+              })}
+            </div>
+            <span className="text-[11px] text-red-600 font-bold mt-1 animate-pulse">
+              {micVolume > 5 ? '🎙️ आवाज़ आ रही है...' : '🎙️ बोलिए, सुन रहे हैं...'}
+            </span>
           </div>
         ) : (
           <p className="text-xs text-stone-500 font-medium mt-4 max-w-xs">
             {language === 'hi' 
-              ? 'बटन दबाकर बोलें, जैसे: "रमेश भाई को दो किलो चीनी और एक पैकेट तेल उधार लिख दो"'
-              : 'Tap to speak, e.g. "Ramesh bhai 2kg sugar and 1 oil packet udhaar"'}
+              ? 'बटन दबाकर रखें और बोलें (या एक बार टैप करके बोलें)' 
+              : 'Press & hold to speak (or tap once to record)'}
           </p>
         )}
       </div>
@@ -230,6 +296,29 @@ export default function GallaVoiceController({
       {statusMessage && (
         <div className="w-full text-xs font-bold text-stone-700 bg-stone-100 p-2.5 rounded-xl border border-stone-200 mb-3 animate-in fade-in duration-150">
           {statusMessage}
+        </div>
+      )}
+
+      {/* Audio Playback Verification Pill (Listen to what your mic recorded!) */}
+      {audioPreviewUrl && lastAudioStats && (
+        <div className="w-full mb-3 p-2.5 bg-emerald-50 rounded-2xl border border-emerald-200 flex items-center justify-between text-xs animate-in fade-in">
+          <div className="flex items-center gap-2 text-emerald-800 font-semibold">
+            <Volume2 className="w-4 h-4 text-emerald-600" />
+            <span>
+              {language === 'hi' ? 'रिकॉर्ड हुई आवाज़:' : 'Microphone audio:'}
+            </span>
+            <span className="text-[10px] bg-emerald-200/80 px-2 py-0.5 rounded-full font-mono">
+              {Math.round(lastAudioStats.durationMs / 100) / 10}s • {Math.round(lastAudioStats.sizeBytes / 1024)} KB WAV
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handlePlayRecordedAudio}
+            className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
+          >
+            <Play className="w-3 h-3 fill-white" />
+            <span>{language === 'hi' ? 'आवाज़ सुनें' : 'Play Audio'}</span>
+          </button>
         </div>
       )}
 

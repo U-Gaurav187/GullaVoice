@@ -66,7 +66,9 @@ export async function transcribeWithGroqWhisper(apiKey, audioBlob, language = 'h
   for (const model of whisperModels) {
     try {
       const formData = new FormData();
-      formData.append('file', audioBlob, 'counter_recording.webm');
+      const isWav = audioBlob.type?.includes('wav');
+      const filename = isWav ? 'counter_recording.wav' : 'counter_recording.webm';
+      formData.append('file', audioBlob, filename);
       formData.append('model', model);
       // Natural language auto-detection: allows seamless Hinglish, Hindi, and English counter speech
       formData.append('prompt', 'Kirana ledger, Ramesh bhai, Sunita bhabhi, Sharma ji, cheeni, tel, dudh, chawal, atta, dal, udhaar, jama, khata, rupaye, kilo, packet');
