@@ -8,8 +8,8 @@ import { INITIAL_RATE_CARD } from '../data/initialRateCard.js';
 import { INITIAL_TRANSACTIONS } from '../data/initialTransactions.js';
 
 const STORAGE_KEYS = {
-  TRANSACTIONS: 'gallavoice_transactions_v2',
-  CUSTOMERS: 'gallavoice_customers_v2',
+  TRANSACTIONS: 'gallavoice_transactions_v3',
+  CUSTOMERS: 'gallavoice_customers_v3',
   RATE_CARD: 'gallavoice_ratecard_v2',
   SETTINGS: 'gallavoice_settings_v1'
 };
@@ -28,106 +28,21 @@ export const DEFAULT_SETTINGS = {
 export const storage = {
   getTransactions: () => {
     try {
-      const dataV2 = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
-      let list = dataV2 ? JSON.parse(dataV2) : INITIAL_TRANSACTIONS;
-
-      // Auto-repair transactions where items or total amount had ₹0 due to missing rate card
-      const rateCard = storage.getRateCard();
-      let hasRepairs = false;
-
-      list = list.map(t => {
-        let itemsModified = false;
-        let updatedItems = (t.items || []).map(i => {
-          let unitP = Number(i.unitPrice) || 0;
-          let calcP = Number(i.calculatedPrice) || 0;
-          if (calcP === 0 || unitP === 0) {
-            const itemNameLower = (i.name || '').toLowerCase().trim();
-            const matchedRate = rateCard.find(rc => 
-              rc.name.toLowerCase() === itemNameLower ||
-              rc.hindiName === i.name ||
-              (rc.aliases && rc.aliases.some(a => itemNameLower.includes(a.toLowerCase()) || a.toLowerCase().includes(itemNameLower)))
-            );
-
-            if (matchedRate) {
-              let qty = parseFloat(i.quantity);
-              if (isNaN(qty)) {
-                if (/चार|char|four/i.test(i.quantity || '')) qty = 4;
-                else if (/तीन|tin|teen/i.test(i.quantity || '')) qty = 3;
-                else if (/दो|do|two|पिलो/i.test(i.quantity || '')) qty = 2;
-                else if (/साढ़े पाव/i.test(i.quantity || '')) qty = 0.375;
-                else if (/पाव/i.test(i.quantity || '')) qty = 0.25;
-                else if (/आधा/i.test(i.quantity || '')) qty = 0.5;
-                else qty = 1;
-              }
-              unitP = matchedRate.unitPrice;
-              calcP = Math.round(unitP * qty);
-              itemsModified = true;
-            } else if (calcP === 0) {
-              // Generic fallback estimate for unknown items (never leave ₹0)
-              calcP = 40;
-              unitP = 40;
-              itemsModified = true;
-            }
-          }
-          return {
-            ...i,
-            unitPrice: unitP,
-            calculatedPrice: calcP
-          };
-        });
-
-        let newTotal = Number(t.totalAmount) || 0;
-        const sumOfItems = updatedItems.reduce((sum, item) => sum + (item.calculatedPrice || 0), 0);
-        if (newTotal === 0 && sumOfItems > 0) {
-          newTotal = sumOfItems;
-          itemsModified = true;
-        }
-
-        // Remap customer if it was pointing to a merged duplicate
-        let custName = t.customerName;
-        let custHindi = t.customerHindiName;
-        let custUp = t.customerUpName;
-        let custId = t.matchedCustomerId;
-        if (/मुषाली|वैशाली|mushali|maishali/i.test(t.customerSpoken || t.customerName || '')) {
-          custId = 'CUST_06';
-          custName = 'Vaishali';
-          custHindi = 'वैशाली';
-          custUp = 'वैशाली भौजी (बहुरिया)';
-        } else if (/प्रमेश|pramesh/i.test(t.customerSpoken || t.customerName || '')) {
-          custId = 'CUST_01';
-          custName = 'Ramesh Bhai';
-          custHindi = 'रमेश भाई';
-          custUp = 'दद्दा (रमेश भैया)';
-        }
-
-        if (itemsModified || custId !== t.matchedCustomerId) {
-          hasRepairs = true;
-        }
-
-        return {
-          ...t,
-          items: updatedItems,
-          totalAmount: newTotal,
-          customerName: custName,
-          customerHindiName: custHindi,
-          customerUpName: custUp,
-          matchedCustomerId: custId
-        };
-      });
-
-      if (hasRepairs) {
-        localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(list));
+      const dataV3 = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
+      if (!dataV3) {
+        return INITIAL_TRANSACTIONS;
       }
-      return list;
+      const list = JSON.parse(dataV3);
+      return Array.isArray(list) ? list : [];
     } catch (e) {
       console.error('Failed to load transactions:', e);
-      return INITIAL_TRANSACTIONS;
+      return [];
     }
   },
 
   saveTransactions: (txns) => {
     try {
-      localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(txns));
+      localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(txns || []));
     } catch (e) {
       console.error('Failed to save transactions:', e);
     }
@@ -135,104 +50,21 @@ export const storage = {
 
   getCustomers: () => {
     try {
-      const dataV2 = localStorage.getItem(STORAGE_KEYS.CUSTOMERS);
-      let list = dataV2 ? JSON.parse(dataV2) : INITIAL_CUSTOMERS;
-
-      // ── CONSOLIDATE & MERGE DUPLICATES ─────────────────────────────
-      // Maps duplicate test accounts (e.g. 'मुषाली', 'प्रमेश भाई', duplicate 'वैशाली') into canonical parents
-      const canonicalVaishali = list.find(c => c.id === 'CUST_06') || INITIAL_CUSTOMERS.find(c => c.id === 'CUST_06');
-      const canonicalRamesh = list.find(c => c.id === 'CUST_01') || INITIAL_CUSTOMERS.find(c => c.id === 'CUST_01');
-      const canonicalAvinash = list.find(c => c.id === 'CUST_08') || INITIAL_CUSTOMERS.find(c => c.id === 'CUST_08');
-
-      let cleanedList = [];
-      let extraVaishaliUdhaar = 0;
-      let extraVaishaliJama = 0;
-      let extraRameshUdhaar = 0;
-      let extraRameshJama = 0;
-      let extraAvinashUdhaar = 0;
-      let extraAvinashJama = 0;
-
-      for (const c of list) {
-        const cName = (c.name || '').toLowerCase().trim();
-        const cHindi = (c.hindiName || '').trim();
-
-        // Check if duplicate of Vaishali (e.g. 'मुषाली', 'वैशाली' with non-CUST_06 id)
-        if (c.id !== 'CUST_06' && (/मुषाली|वैशाली|mushali|maishali/i.test(cName) || /मुषाली|वैशाली/i.test(cHindi))) {
-          extraVaishaliUdhaar += (c.totalUdhaar || 0);
-          extraVaishaliJama += (c.totalJama || 0);
-          continue; // Drop duplicate row
-        }
-
-        // Check if duplicate of Ramesh Bhai (e.g. 'प्रमेश भाई' with non-CUST_01 id)
-        if (c.id !== 'CUST_01' && (/प्रमेश|pramesh/i.test(cName) || /प्रमेश/i.test(cHindi))) {
-          extraRameshUdhaar += (c.totalUdhaar || 0);
-          extraRameshJama += (c.totalJama || 0);
-          continue; // Drop duplicate row
-        }
-
-        // Check if duplicate of Avinash
-        if (c.id !== 'CUST_08' && (/अभिनाश|avinash|abhinash/i.test(cName) || /अभिनाश|अविनाश/i.test(cHindi))) {
-          extraAvinashUdhaar += (c.totalUdhaar || 0);
-          extraAvinashJama += (c.totalJama || 0);
-          continue; // Drop duplicate row
-        }
-
-        cleanedList.push(c);
+      const dataV3 = localStorage.getItem(STORAGE_KEYS.CUSTOMERS);
+      if (!dataV3) {
+        return INITIAL_CUSTOMERS;
       }
-
-      // Add merged balances to canonical records
-      cleanedList = cleanedList.map(c => {
-        if (c.id === 'CUST_06' && (extraVaishaliUdhaar > 0 || extraVaishaliJama > 0)) {
-          const u = c.totalUdhaar + extraVaishaliUdhaar;
-          const j = c.totalJama + extraVaishaliJama;
-          return { ...c, totalUdhaar: u, totalJama: j, netBalance: u - j };
-        }
-        if (c.id === 'CUST_01' && (extraRameshUdhaar > 0 || extraRameshJama > 0)) {
-          const u = c.totalUdhaar + extraRameshUdhaar;
-          const j = c.totalJama + extraRameshJama;
-          return { ...c, totalUdhaar: u, totalJama: j, netBalance: u - j };
-        }
-        if (c.id === 'CUST_08' && (extraAvinashUdhaar > 0 || extraAvinashJama > 0)) {
-          const u = c.totalUdhaar + extraAvinashUdhaar;
-          const j = c.totalJama + extraAvinashJama;
-          return { ...c, totalUdhaar: u, totalJama: j, netBalance: u - j };
-        }
-        return c;
-      });
-
-      // Ensure latest aliases and UP names are synced from INITIAL_CUSTOMERS
-      cleanedList = cleanedList.map(c => {
-        const init = INITIAL_CUSTOMERS.find(ic => ic.id === c.id || ic.name.toLowerCase() === c.name.toLowerCase());
-        if (init) {
-          const mergedAliases = Array.from(new Set([...(c.aliases || []), ...(init.aliases || [])]));
-          return {
-            ...c,
-            hindiName: c.hindiName || init.hindiName,
-            upNativeName: c.upNativeName || init.upNativeName,
-            aliases: mergedAliases
-          };
-        }
-        return c;
-      });
-
-      // Ensure any missing initial customers exist
-      INITIAL_CUSTOMERS.forEach(ic => {
-        if (!cleanedList.some(c => c.id === ic.id || c.name.toLowerCase() === ic.name.toLowerCase())) {
-          cleanedList.push(ic);
-        }
-      });
-
-      localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(cleanedList));
-      return cleanedList;
+      const list = JSON.parse(dataV3);
+      return Array.isArray(list) ? list : [];
     } catch (e) {
       console.error('Failed to load customers:', e);
-      return INITIAL_CUSTOMERS;
+      return [];
     }
   },
 
   saveCustomers: (customers) => {
     try {
-      localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(customers));
+      localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(customers || []));
     } catch (e) {
       console.error('Failed to save customers:', e);
     }
@@ -294,8 +126,12 @@ export const storage = {
   },
 
   resetAll: () => {
-    localStorage.removeItem(STORAGE_KEYS.TRANSACTIONS);
-    localStorage.removeItem(STORAGE_KEYS.CUSTOMERS);
+    localStorage.removeItem('gallavoice_transactions_v1');
+    localStorage.removeItem('gallavoice_transactions_v2');
+    localStorage.removeItem('gallavoice_transactions_v3');
+    localStorage.removeItem('gallavoice_customers_v1');
+    localStorage.removeItem('gallavoice_customers_v2');
+    localStorage.removeItem('gallavoice_customers_v3');
     localStorage.removeItem(STORAGE_KEYS.RATE_CARD);
     localStorage.removeItem(STORAGE_KEYS.SETTINGS);
   }

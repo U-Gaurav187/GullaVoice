@@ -24,12 +24,9 @@ OPERATIONAL KIRANA DISCOURSE BIFURCATION RULES (CRITICAL):
    When multiple items are listed before a commit verb (e.g. "4 kilo rice, 5 kilo dal aur 2 kilo aloo likh do"), all chained items belong to the commit command.
 
 4. ACCENT, ACOUSTIC ARTIFACT & PHONETIC DISAMBIGUATION:
-   - Breath clicks, lip smacks, or noisy counter microphones frequently prepend or mutate initial consonants:
-     * "प्रमेश" / "प्रमेश भाई" / "Pramesh" / "Rames" -> MUST MATCH to "Ramesh Bhai" (CUST_01)
-     * "मुषाली" / "Maishali" / "Mushali" / "मैशाली" / "वैसाली" -> MUST MATCH to "Vaishali" (CUST_06)
-     * "पार्थे" / "Parthe" -> MUST MATCH to "Parth" (CUST_07)
-     * "पिंटू" / "Pintoo" -> MUST MATCH to "Pintu Auto" (CUST_03)
-     * "शर्मा" / "Sarma" -> MUST MATCH to "Sharma Ji" (CUST_04)
+   - Breath clicks, lip smacks, or noisy counter microphones frequently prepend or mutate initial consonants.
+   - If EXISTING CUSTOMERS IN STORE DATABASE contains matching customer records or aliases, match the spoken name to that customer.
+   - If NO customer matches or the database is currently empty, extract the spoken customer name as a new customer (e.g. "वैशाली" -> Vaishali, "राकेश" -> Rakesh).
    - Accent & Colloquial grocery items:
      * "कांदा" / "kanda" = Pyaz (Onions)
      * "दनिया" / "हरा दनिया" = Hara Dhania (Coriander)
@@ -40,11 +37,6 @@ OPERATIONAL KIRANA DISCOURSE BIFURCATION RULES (CRITICAL):
      * "tin kilo" / "तिन" = 3 kg
      * "dedh sau" = 150, "dhai sau" = 250, "sawa sau" = 125, "paune do sau" = 175
      * "aadha kilo" = 0.5 kg, "pav kilo" / "pao" = 0.25 kg, "paun kilo" = 0.75 kg, "dedh kilo" = 1.5 kg
-   - ALWAYS map distorted or accented spoken customer names to the closest matching customer in the EXISTING CUSTOMERS directory!
-     * "अभिनाश केट" or "अभिनाश" or "अब आज के" -> Avinash (अविनाश)
-     * "प्रमेश" or "रमेश" -> Ramesh Bhai (रमेश भाई)
-     * "मुषाली" or "वैशाली" -> Vaishali (वैशाली)
-     * "पार्थ" -> Parth (पार्थ)
    - Match items against store rate card and compute calculated_price_inr:
      * "सेव" / "सेब" / "नमकीन" -> Sev (₹160/kg)
    - If unit price or total amount is not explicitly stated in spoken command, compute total_amount_inr by multiplying quantity * rateCard.unitPrice!
