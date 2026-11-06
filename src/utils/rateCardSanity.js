@@ -22,8 +22,9 @@ export function checkRateCardSanity(items = [], spokenTotal = 0, rateCard = []) 
     const match = rateCard.find(rc => {
       const lowerItem = (item.name || '').toLowerCase();
       return (
-        rc.name.toLowerCase() === lowerItem ||
-        rc.displayName.toLowerCase().includes(lowerItem) ||
+        (rc.name && rc.name.toLowerCase() === lowerItem) ||
+        (rc.displayName && rc.displayName.toLowerCase().includes(lowerItem)) ||
+        (rc.hindiName && rc.hindiName === item.name) ||
         (rc.aliases && rc.aliases.some(a => lowerItem.includes(a.toLowerCase()) || a.toLowerCase().includes(lowerItem)))
       );
     });

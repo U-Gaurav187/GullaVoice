@@ -7,28 +7,24 @@
 export const GALLA_SYSTEM_PROMPT = `You are an expert Indian Kirana store ledger AI ('Galla AI').
 Your job is to parse spoken voice commands from shopkeepers sitting at noisy cash counters.
 
-OPERATIONAL KIRANA DISCOURSE BIFURCATION RULES (CRITICAL):
-1. DISCOURSE BIFURCATION (Analyze FIRST before extracting items):
-   Break the raw transcript into discourse clauses inside the "discourse_clauses" array:
-   - "LEDGER_HEADER": Opening customer account reference (e.g. "वैशाली के खाते में", "Ramesh bhai ko", "Sharma ji ke khate mein"). Action: "TARGET".
-   - "COMMIT_COMMAND": Accounting instructions directly governed by recording imperatives like "likh do" (लिख दो), "chadha do" (चढ़ा दो), "khate mein daalo", "udhaar likho", "jama karo", "jama likho". Action: "RECORD".
-   - "HELPER_DISPATCH": Physical counter dispatch commands to workers/helpers like "Chhotu packet de de", "Chhotu 2 kilo aloo de de", "chai le aa", "pack kar". Action: "IGNORE" (This is a physical store command, NOT a ledger entry!).
-   - "CUSTOMER_INQUIRY": Conversational banter, questions, or future queries to customers like "leke aayegi kya?", "chahiye kya?", "kitne ka hai?", "aur kuch nahi hai". Action: "IGNORE" (Conversational inquiry, NOT a ledger entry!).
-   - "PERSONAL_ASIDE": Family or personal ambient talk like "mummy khane mein kya bana hai", "mobile rakh yaar", "khulle nahi hai". Action: "IGNORE".
+OPERATIONAL KIRANA DISCOURSE & LEDGER RULES (CRITICAL):
+1. DISCOURSE BIFURCATION & RECORDING INTENT:
+   - When a sentence opens with or mentions a customer account (e.g. "वैशाली के खाते में", "Ramesh bhai ko", "Sharma ji ke khate mein") and lists Kirana items (e.g. "एक वैसलीन, चार किलो कांदे, एक किलो तेल, दो किलो आलू"):
+     This is ALWAYS an active UDHAAR ledger transaction!
+   - Acoustic/dialect recording imperatives MUST be recognized:
+     * "रगदा" / "रख दा" / "रख दो" / "रख देना" / "लिख दो" / "लिख लो" / "डाल दो" / "चढ़ा दो" / "जोड़ दो" / "कर दो" -> Action: "RECORD"
+     * Even if the sentence ends without a verb or with an acoustic slip (like "रगदा"), if a customer and grocery items are present, extract them into "items" and set transaction_type to "UDHAAR"!
+   - Helper dispatch commands to workers ("Chhotu packet de de", "chai le aa") and customer inquiries ("chahiye kya?", "kitne ka hai?") are IGNORED.
 
-2. VERB-ANCHORING FOR ITEMS:
-   An item MUST ONLY be extracted into "items" if it belongs to a "COMMIT_COMMAND" governed by a recording imperative ("likh do", "chadha do", "daalo", "udhaar", "jama").
-   Items mentioned in helper dispatch ("Chhotu 2 kilo aloo de de") or customer inquiries ("2 kilo rawa leke aayegi kya") MUST NEVER be added to "items"!
+2. MULTI-ITEM CHAINING:
+   When multiple items are listed (e.g. "एक वैसलीन, चार किलो कांदे, एक किलो तेल, और दो किलो आलू रगदा"), ALL listed items belong to the transaction.
 
-3. MULTI-ITEM CHAINING:
-   When multiple items are listed before a commit verb (e.g. "4 kilo rice, 5 kilo dal aur 2 kilo aloo likh do"), all chained items belong to the commit command.
-
-4. ACCENT, ACOUSTIC ARTIFACT & PHONETIC DISAMBIGUATION:
+3. ACCENT, ACOUSTIC ARTIFACT & PHONETIC DISAMBIGUATION:
    - Breath clicks, lip smacks, or noisy counter microphones frequently prepend or mutate initial consonants.
    - If EXISTING CUSTOMERS IN STORE DATABASE contains matching customer records or aliases, match the spoken name to that customer.
    - If NO customer matches or the database is currently empty, extract the spoken customer name as a new customer (e.g. "वैशाली" -> Vaishali, "राकेश" -> Rakesh).
    - Accent & Colloquial grocery items:
-     * "कांदा" / "kanda" = Pyaz (Onions)
+     * "कांदा" / "कांदे" / "kanda" = Pyaz (Onions)
      * "दनिया" / "हरा दनिया" = Hara Dhania (Coriander)
      * "टामाटर" = Tamatar (Tomatoes)
      * "केडा चिप्स" = Kela Chips (Banana Chips)
@@ -38,10 +34,14 @@ OPERATIONAL KIRANA DISCOURSE BIFURCATION RULES (CRITICAL):
      * "dedh sau" = 150, "dhai sau" = 250, "sawa sau" = 125, "paune do sau" = 175
      * "aadha kilo" = 0.5 kg, "pav kilo" / "pao" = 0.25 kg, "paun kilo" = 0.75 kg, "dedh kilo" = 1.5 kg
    - Match items against store rate card and compute calculated_price_inr:
+     * "वैसलीन" / "vaseline" -> Vaseline (₹45)
+     * "तेल" / "oil" -> Tel (₹140/kg or pkt)
+     * "आलू" / "potato" -> Aloo (₹30/kg)
+     * "कांदा" / "onion" -> Kanda (₹20/kg)
      * "सेव" / "सेब" / "नमकीन" -> Sev (₹160/kg)
    - If unit price or total amount is not explicitly stated in spoken command, compute total_amount_inr by multiplying quantity * rateCard.unitPrice!
 
-5. DUAL-LANGUAGE VOICE READBACK:
+4. DUAL-LANGUAGE VOICE READBACK:
    - "tts_hindi_readback": Clear, natural Devanagari Hindi readback confirming the customer name, items, and total amount.
    - "tts_readback": English/Hinglish readback.
 
@@ -74,8 +74,11 @@ Respond strictly in valid JSON conforming to this schema:
 }`;
 
 const CANDIDATE_CHAT_MODELS = [
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
   'openai/gpt-oss-120b',
   'openai/gpt-oss-20b',
+  'mixtral-8x7b-32768',
   'qwen/qwen3.8-27b'
 ];
 

@@ -49,13 +49,13 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
   const normalizedText = normalizeColloquialQuantities(cleanedCommand);
 
   // Step 3: Determine Intent (UDHAAR vs JAMA vs CHECK_BALANCE vs NOISE_ONLY)
-  const isJama = /\b(jama|diye|diya|pay|payment|jama karo|jama kar do|jama likho)\b/i.test(normalizedText);
-  const isUdhaar = /\b(udhaar|udhar|baaki|baki|khate me|likh do|likho|daal do)\b/i.test(normalizedText);
+  const isJama = /\b(jama|diye|diya|pay|payment|jama karo|jama kar do|jama likho)\b|जमा|दिए|दिया/i.test(normalizedText);
+  const isUdhaar = /\b(udhaar|udhar|baaki|baki|khate me|khate mein|likh do|likho|daal do|rakh do|ragda)\b|उधार|खाते में|खाते|लिख दो|रख दो|रगदा|रख दा|डाल दो|चढ़ा दो/i.test(normalizedText);
 
   // Check if it's purely noise without transaction cues
-  const hasTransactionKeywords = isJama || isUdhaar || /\b(rupaye|rupee|rs|kilo|packet|pkt|lit)\b/i.test(normalizedText);
+  const hasTransactionKeywords = isJama || isUdhaar || /\b(rupaye|rupee|rs|kilo|packet|pkt|lit)\b|रुपये|किलो|पैकेट|लीटर/i.test(normalizedText);
 
-  if (!hasTransactionKeywords && removedNoiseSegments.length > 0 && !normalizedText.includes('ko')) {
+  if (!hasTransactionKeywords && removedNoiseSegments.length > 0 && !normalizedText.includes('ko') && !normalizedText.includes('को')) {
     return {
       intent: 'NOISE_ONLY',
       customer_spoken: '',
@@ -76,8 +76,8 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
   // Step 4: Extract Customer Name & Apply Phonetic Fuzzy Matching
   let spokenCustomerName = '';
 
-  // Look for target customer phrase: e.g. "Ramesh bhai ko", "Sunita bhabhi ko", "Sharma ji ko"
-  const koMatch = normalizedText.match(/^([a-z\s]+?)\s+(ko|ke\s+khate|ka)\b/i);
+  // Look for target customer phrase: e.g. "वैशाली के खाते में", "Ramesh bhai ko", "Sunita bhabhi ko"
+  const koMatch = normalizedText.match(/^([\p{L}\p{M}\s]+?)\s+(?:के\s+खाते\s+में|ke\s+khate\s+mein|के\s+खाते|ke\s+khate|को|ko|का|ka|की|के|ke)(?:[\s,।]+|$)/iu);
   if (koMatch) {
     spokenCustomerName = koMatch[1].trim();
   } else {
@@ -110,13 +110,13 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
   } else {
     // For UDHAAR, match items from store rate card
     for (const rc of rateCard) {
-      const searchTerms = [rc.name, rc.displayName, ...(rc.aliases || [])];
+      const searchTerms = [rc.name, rc.displayName, rc.hindiName, ...(rc.aliases || [])].filter(Boolean);
       for (const term of searchTerms) {
         const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        // Match quantity before item: e.g., "2 kilo cheeni", "1 packet tel", "0.5 kilo cheeni"
-        const beforeRegex = new RegExp(`(\\d+(\\.\\d+)?)\\s*(kilo|kg|packet|pkt|nag|l|liter)?\\s*${escaped}`, 'i');
-        // Match quantity after item: e.g., "cheeni 2 kilo", "tel ek packet"
-        const afterRegex = new RegExp(`${escaped}\\s*(\\d+(\\.\\d+)?)\\s*(kilo|kg|packet|pkt|nag|l|liter)?`, 'i');
+        // Match quantity before item: e.g., "2 kilo cheeni", "4 किलो कांदे", "1 packet tel"
+        const beforeRegex = new RegExp(`(\\d+(\\.\\d+)?)\\s*(kilo|kg|packet|pkt|nag|l|liter|किलो|पैकेट|लीटर)?\\s*${escaped}`, 'iu');
+        // Match quantity after item: e.g., "cheeni 2 kilo", "कांदे 4 किलो"
+        const afterRegex = new RegExp(`${escaped}\\s*(\\d+(\\.\\d+)?)\\s*(kilo|kg|packet|pkt|nag|l|liter|किलो|पैकेट|लीटर)?`, 'iu');
 
         let qty = 0;
         let unit = rc.unit || 'unit';
@@ -130,7 +130,7 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
         } else if (matchAfter) {
           qty = parseFloat(matchAfter[1]);
           if (matchAfter[3]) unit = matchAfter[3];
-        } else if (new RegExp(`\\b${escaped}\\b`, 'i').test(normalizedText)) {
+        } else if (normalizedText.includes(term.toLowerCase())) {
           // Mentioned without explicit quantity -> default to 1 unit
           qty = 1;
         }

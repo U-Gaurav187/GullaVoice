@@ -102,6 +102,31 @@ export function normalizeColloquialQuantities(text = '') {
     return String(val * 1000);
   });
 
+  // Replace Devanagari Hindi numeral words (e.g. "एक" -> 1, "चार किलो" -> "4 किलो")
+  const DEVANAGARI_WORD_NUMBERS = {
+    'एक': '1',
+    'दो': '2',
+    'पिलो': '2',
+    'तीन': '3',
+    'तिन': '3',
+    'चार': '4',
+    'पाँच': '5',
+    'पांच': '5',
+    'छह': '6',
+    'सात': '7',
+    'आठ': '8',
+    'नौ': '9',
+    'दस': '10',
+    'आधा': '0.5',
+    'पाव': '0.25',
+    'साढ़े पाव': '0.375',
+    'डेढ़': '1.5',
+    'ढाई': '2.5'
+  };
+  for (const [devWord, digit] of Object.entries(DEVANAGARI_WORD_NUMBERS)) {
+    str = str.split(devWord).join(digit);
+  }
+
   // Replace standalone Hindi single words for quantities:
   // e.g. "do packet" -> "2 packet", "paanch kilo" -> "5 kilo"
   const wordRegex = /\b(ek|do|teen|tin|char|chaar|panch|paanch|chhe|saat|aath|nau|das|gyarah|barah|terah|chaudah|pandrah|solah|satrah|atharah|unnis|bees|pacchis|tees|chalis|pachas)\b/gi;
