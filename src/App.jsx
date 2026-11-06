@@ -503,13 +503,11 @@ export default function App() {
     }
   };
 
-  const handleLanguageModalSave = ({ language, groqApiKey }) => {
+  const handleLanguageModalSave = ({ language }) => {
     localStorage.setItem('gallavoice_welcome_seen_v1', 'true');
     setSettings(prev => ({
       ...prev,
-      speechLanguage: language,
-      groqApiKey: groqApiKey || prev.groqApiKey,
-      engine: groqApiKey ? 'GROQ_LLAMA' : prev.engine
+      speechLanguage: language
     }));
   };
 
@@ -621,7 +619,6 @@ export default function App() {
         isOpen={isLanguageModalOpen}
         onClose={() => setIsLanguageModalOpen(false)}
         currentLanguage={currentLanguage}
-        groqKey={settings.groqApiKey}
         onSave={handleLanguageModalSave}
       />
 
