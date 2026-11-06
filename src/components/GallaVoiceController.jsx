@@ -53,7 +53,19 @@ export default function GallaVoiceController({
 
       try {
         const result = await audioRecorder.stop();
-        if (!result || !result.blob) {
+        if (!result) {
+          setStatusMessage('');
+          return;
+        }
+
+        if (result.isSilent) {
+          setStatusMessage(language === 'hi' 
+            ? '⚠️ माइक से कोई आवाज़ नहीं आई (माइक म्यूट तो नहीं?)। कृपया अनम्यूट करके दोबारा बोलें।' 
+            : '⚠️ No voice detected (mic may be muted). Please check mic and try again.');
+          return;
+        }
+
+        if (!result.blob) {
           setStatusMessage('');
           return;
         }

@@ -82,9 +82,9 @@ Respond strictly in valid JSON conforming to this schema:
 }`;
 
 const CANDIDATE_CHAT_MODELS = [
-  'llama-3.3-70b-versatile',
-  'llama-3.1-8b-instant',
-  'gemma2-9b-it'
+  'openai/gpt-oss-120b',
+  'openai/gpt-oss-20b',
+  'qwen/qwen3.8-27b'
 ];
 
 /**
@@ -109,12 +109,9 @@ export async function transcribeWithGroqWhisper(apiKey, audioBlob, language = 'h
       // CRITICAL: Explicitly set language so Whisper never misidentifies Hindi as Arabic/Turkish/Urdu
       formData.append('language', language === 'en' ? 'en' : 'hi');
 
-      // Bilingual prompt with Devanagari + Romanized to anchor Whisper's decoder in correct script & names
+      // Concise vocabulary anchor prompt for Whisper decoder
       formData.append('prompt',
-        'किराना खाता रोजनामचा। ग्राहक नाम: अविनाश, रमेश भाई, वैशाली, पार्थ, सुनीता भाभी, शर्मा जी, पिंटू, महेश टेलर। ' +
-        'सामान: सेव, सेब, नमकीन, आलू, कांदा, प्याज, टमाटर, धनिया, हरी मिर्च, केला चिप्स, तिल का तेल, चीनी, तेल, दूध, चावल, आटा, दाल। ' +
-        'मात्रा: चार किलो, दो किलो, तीन किलो, पाव किलो, आधा किलो, एक पैकेट। ' +
-        'आदेश: खाते में लिख दो, उधार लिखो, जमा करो।'
+        'किराना खाता: अविनाश, रमेश भाई, वैशाली, पार्थ, सुनीता, शर्मा जी, पिंटू, महेश। सेव, नमकीन, आलू, कांदा, प्याज, टमाटर, धनिया, चीनी, दूध, तेल, चावल। दो किलो, चार किलो, उधार लिखो, जमा करो।'
       );
 
       // temperature=0 eliminates hallucination on quiet/noisy audio

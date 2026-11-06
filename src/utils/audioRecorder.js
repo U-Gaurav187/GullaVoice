@@ -209,9 +209,18 @@ export class AudioRecorder {
             originalWebmSize: webmBlob.size
           });
         } catch (convErr) {
+          this.cleanup();
+          if (convErr.message && convErr.message.startsWith('SILENT_AUDIO:')) {
+            console.warn('⚠️ Silence detected:', convErr.message);
+            resolve({
+              isSilent: true,
+              durationMs: elapsedMs,
+              errorMessage: convErr.message
+            });
+            return;
+          }
           console.error('WAV conversion failed, sending raw WebM:', convErr.message);
           // Fallback: send the raw WebM to Whisper (it accepts WebM too)
-          this.cleanup();
           resolve({
             blob: webmBlob,
             durationMs: elapsedMs,
@@ -273,8 +282,10 @@ export class AudioRecorder {
 
     console.log(`🔊 Decoded Audio: ${inputRate}Hz, ${rawPcm.length} samples (${(rawPcm.length / inputRate).toFixed(1)}s), RMS=${rms.toFixed(4)} (${rmsDb} dBFS), Peak=${peak.toFixed(4)} (${peakDb} dBFS)`);
 
-    if (rms < 0.003) {
-      console.warn('⚠️ Decoded audio is VERY QUIET. Mic may not be capturing speech.');
+    if (rms < 0.005) {
+      console.warn('⚠️ Decoded audio is silent or near-zero (RMS < 0.005). Microphone is muted or uncaptured.');
+      await tempCtx.close().catch(() => {});
+      throw new Error('SILENT_AUDIO: माइक्रोफ़ोन से कोई आवाज़ नहीं आई (वॉल्यूम 0% है)। कृपया अपना माइक म्यूट चेक करें और दोबारा बोलें।');
     } else {
       console.log('✅ Audio levels look healthy for speech recognition.');
     }
