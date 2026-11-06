@@ -80,11 +80,46 @@ const CANDIDATE_CHAT_MODELS = [
 ];
 
 /**
- * Transcribe Audio Blob using Groq Whisper Large v3 Turbo (with fallback to v3)
+ * Helper to encode Audio Blob as Base64 for secure serverless API proxy
+ */
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result;
+      const base64 = typeof result === 'string' && result.includes(',') ? result.split(',')[1] : result;
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Transcribe Audio Blob using Groq Whisper Large v3 Turbo
+ * Uses secure serverless proxy (/api/transcribe) if no client key is provided
  */
 export async function transcribeWithGroqWhisper(apiKey, audioBlob, language = 'hi') {
+  // If NO apiKey provided, route securely through serverless API proxy (zero key exposure)
   if (!apiKey) {
-    throw new Error('Groq API Key is missing. Please enter your free Groq API key.');
+    console.log('🔒 Using secure serverless proxy /api/transcribe (API key hidden on server)...');
+    const base64 = await blobToBase64(audioBlob);
+    const response = await fetch('/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        audioBase64: base64,
+        mimeType: audioBlob.type || 'audio/wav',
+        language: language === 'en' ? 'en' : 'hi'
+      })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      return (data.text || '').trim();
+    }
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || `Serverless Whisper error ${response.status}`);
   }
 
   const whisperModels = ['whisper-large-v3-turbo', 'whisper-large-v3'];
@@ -141,10 +176,28 @@ export async function transcribeWithGroqWhisper(apiKey, audioBlob, language = 'h
 
 /**
  * Extract structured ledger transaction JSON from transcript using Groq models
+ * Uses secure serverless proxy (/api/chat) if no client key is provided
  */
 export async function parseWithGroqLlama({ apiKey, transcript, customers = [], rateCard = [], language = 'hi' }) {
+  // If NO apiKey provided, route securely through serverless API proxy (zero key exposure)
   if (!apiKey) {
-    throw new Error('Groq API Key is missing. Please enter your free Groq API key.');
+    console.log('🔒 Using secure serverless proxy /api/chat (API key hidden on server)...');
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        transcript,
+        customers,
+        rateCard,
+        language
+      })
+    });
+
+    if (response.ok) {
+      return await response.json();
+    }
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || `Serverless Groq Chat error ${response.status}`);
   }
 
   const userContext = `

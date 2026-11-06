@@ -88,11 +88,6 @@ export default function App() {
    * followed by multi-model resilient extraction (Llama 3.3 70B / Llama 3.1 8B Instant)
    */
   const handleAudioRecorded = async (audioBlob) => {
-    if (!effectiveGroqKey && !effectiveWisprKey) {
-      setIsLanguageModalOpen(true);
-      return;
-    }
-
     setIsProcessing(true);
     speechTTS.stop();
 
@@ -125,14 +120,24 @@ export default function App() {
         }
       }
 
-      // Priority 2 / Fallback: Groq Whisper Large v3 Turbo
-      if (!transcript && effectiveGroqKey) {
-        transcript = await transcribeWithGroqWhisper(
-          effectiveGroqKey, 
-          audioBlob, 
-          currentLanguage
-        );
-        console.log('📝 Groq Whisper Transcription:', transcript);
+      // Priority 2 / Fallback: Groq Whisper Large v3 Turbo (or secure serverless proxy)
+      if (!transcript) {
+        try {
+          transcript = await transcribeWithGroqWhisper(
+            effectiveGroqKey, 
+            audioBlob, 
+            currentLanguage
+          );
+          console.log('📝 Groq Whisper Transcription:', transcript);
+        } catch (groqErr) {
+          console.warn('Groq Whisper failed:', groqErr.message);
+          // If both failed and no key exists, open settings
+          if (!effectiveGroqKey && !effectiveWisprKey) {
+            setIsLanguageModalOpen(true);
+            return;
+          }
+          throw groqErr;
+        }
       }
 
       if (!transcript || transcript.trim().length === 0) {
@@ -176,20 +181,18 @@ export default function App() {
   const executeAIParser = async (transcriptText) => {
     let parsedResult = null;
 
-    // 1. High-Speed Groq Engine (Llama / GPT-OSS 120B) - Sub-second turnaround (~1.1s)
-    if (effectiveGroqKey) {
-      try {
-        console.log('⚡ Processing via Groq Turbo AI Engine...');
-        parsedResult = await parseWithGroqLlama({
-          apiKey: effectiveGroqKey,
-          transcript: transcriptText,
-          customers,
-          rateCard,
-          language: currentLanguage
-        });
-      } catch (err) {
-        console.warn('Groq parsing failed, trying Gemini Flash:', err.message);
-      }
+    // 1. High-Speed Groq Engine (Llama / GPT-OSS 120B or secure serverless proxy)
+    try {
+      console.log('⚡ Processing via Groq Turbo AI Engine (or secure proxy)...');
+      parsedResult = await parseWithGroqLlama({
+        apiKey: effectiveGroqKey,
+        transcript: transcriptText,
+        customers,
+        rateCard,
+        language: currentLanguage
+      });
+    } catch (err) {
+      console.warn('Groq parsing failed, trying Gemini Flash:', err.message);
     }
 
     // 2. Google Gemini 3.5 Flash if Groq was unavailable or failed
