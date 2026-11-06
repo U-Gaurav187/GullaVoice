@@ -1,9 +1,15 @@
 /**
- * Google AI Studio Gemini Service (gemini-2.5-flash / gemini-1.5-flash)
+ * Google AI Studio Gemini Service (gemini-3.5-flash / gemini-3.8-flash)
  * Supports both text structured extraction and direct multimodal audio processing!
  */
 
 import { GALLA_SYSTEM_PROMPT } from './groqService.js';
+
+const CANDIDATE_GEMINI_MODELS = [
+  'gemini-3.5-flash',
+  'gemini-3.8-flash',
+  'gemini-flash-latest'
+];
 
 /**
  * Text structured JSON extraction using Gemini Flash
@@ -28,34 +34,40 @@ RAW SPOKEN TRANSCRIPT FROM MICROPHONE:
 "${transcript}"
 `;
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey.trim()}`;
+  let lastError = null;
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{
-        parts: [{ text: prompt }]
-      }],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        temperature: 0.1
+  for (const model of CANDIDATE_GEMINI_MODELS) {
+    try {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`;
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.1
+          }
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (rawText) {
+          return JSON.parse(rawText);
+        }
+      } else {
+        const errData = await response.json().catch(() => ({}));
+        lastError = new Error(errData.error?.message || `Gemini Error ${response.status}`);
       }
-    })
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || `Gemini API Error: ${response.status} ${response.statusText}`);
+    } catch (e) {
+      lastError = e;
+    }
   }
 
-  const data = await response.json();
-  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!rawText) {
-    throw new Error('Empty response received from Gemini API.');
-  }
-
-  return JSON.parse(rawText);
+  throw lastError || new Error('Gemini API parsing failed.');
 }
 
 /**
@@ -97,35 +109,43 @@ Listen carefully to this audio recording of a kirana shopkeeper speaking in Hind
 4. Output strictly valid JSON conforming to the schema.
 `;
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey.trim()}`;
+  let lastError = null;
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{
-        parts: [
-          { inlineData: { mimeType, data: base64Data } },
-          { text: prompt }
-        ]
-      }],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        temperature: 0.1
+  for (const model of CANDIDATE_GEMINI_MODELS) {
+    try {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`;
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { inlineData: { mimeType, data: base64Data } },
+              { text: prompt }
+            ]
+          }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.1
+          }
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (rawText) {
+          return JSON.parse(rawText);
+        }
+      } else {
+        const errData = await response.json().catch(() => ({}));
+        lastError = new Error(errData.error?.message || `Gemini Audio Error ${response.status}`);
       }
-    })
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || `Gemini API Error: ${response.status}`);
+    } catch (e) {
+      lastError = e;
+    }
   }
 
-  const data = await response.json();
-  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!rawText) {
-    throw new Error('Empty response from Gemini Audio.');
-  }
-
-  return JSON.parse(rawText);
+  throw lastError || new Error('Gemini audio parsing failed.');
 }

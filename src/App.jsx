@@ -24,6 +24,7 @@ import LanguageSelectModal from './components/LanguageSelectModal.jsx';
 import { storage } from './utils/storage.js';
 import { speechTTS } from './utils/speechTTS.js';
 import { transcribeWithGroqWhisper, parseWithGroqLlama } from './services/groqService.js';
+import { parseWithGeminiFlash } from './services/geminiService.js';
 import { parseKiranaVoiceLocally } from './services/localParser.js';
 
 export default function App() {
@@ -70,6 +71,7 @@ export default function App() {
 
   const currentLanguage = settings.speechLanguage === 'en' ? 'en' : 'hi';
   const effectiveGroqKey = settings.groqApiKey || import.meta.env.VITE_GROQ_API_KEY || '';
+  const effectiveGeminiKey = settings.geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY || '';
 
   // Aggregate stats
   const totalUdhaar = customers.reduce((sum, c) => sum + (c.totalUdhaar || 0), 0);
@@ -135,13 +137,31 @@ export default function App() {
   };
 
   /**
-   * Executes AI LLM parser (or fallback if key missing)
+   * Executes AI LLM parser (Gemini 3.5 Flash or Groq with local fallback)
    */
   const executeAIParser = async (transcriptText) => {
-    let parsedResult;
+    let parsedResult = null;
 
-    if (effectiveGroqKey) {
+    // 1. Try Google Gemini Flash if key is present
+    if (effectiveGeminiKey) {
       try {
+        console.log('⚡ Processing via Google Gemini 3.5 Flash...');
+        parsedResult = await parseWithGeminiFlash({
+          apiKey: effectiveGeminiKey,
+          transcript: transcriptText,
+          customers,
+          rateCard,
+          language: currentLanguage
+        });
+      } catch (err) {
+        console.warn('Gemini parsing error, trying Groq:', err.message);
+      }
+    }
+
+    // 2. Try Groq if Gemini wasn't used or failed
+    if (!parsedResult && effectiveGroqKey) {
+      try {
+        console.log('⚡ Processing via Groq AI...');
         parsedResult = await parseWithGroqLlama({
           apiKey: effectiveGroqKey,
           transcript: transcriptText,
@@ -150,10 +170,12 @@ export default function App() {
           language: currentLanguage
         });
       } catch (err) {
-        console.warn('Groq Llama failed, falling back to local engine:', err);
-        parsedResult = parseKiranaVoiceLocally(transcriptText, customers, rateCard);
+        console.warn('Groq failed, falling back to local engine:', err.message);
       }
-    } else {
+    }
+
+    // 3. Fallback to Local Deterministic Engine
+    if (!parsedResult) {
       parsedResult = parseKiranaVoiceLocally(transcriptText, customers, rateCard);
     }
 
