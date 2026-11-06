@@ -1,6 +1,7 @@
 /**
- * Groq Cloud AI Engine (Whisper Large v3 Turbo & Llama 3.3 70B Versatile)
- * Provides ultra-fast (~300ms) voice transcription and ledger JSON extraction.
+ * Groq Cloud AI Engine (Whisper STT + Fast LLM JSON Extractor)
+ * Automatically adapts across available Groq models (Llama 3.3, GPT-OSS 120B/20B, Qwen)
+ * and Whisper Large v3 Turbo for reliable, zero-latency parsing.
  */
 
 export const GALLA_SYSTEM_PROMPT = `You are an expert Indian Kirana store ledger AI ('Galla AI').
@@ -44,42 +45,59 @@ Respond ONLY with valid JSON conforming strictly to this schema:
   "tts_hindi_readback": "string (Always provide Hindi version as well)"
 }`;
 
+const CANDIDATE_CHAT_MODELS = [
+  'llama-3.3-70b-versatile',
+  'openai/gpt-oss-120b',
+  'openai/gpt-oss-20b',
+  'qwen/qwen3.8-27b'
+];
+
 /**
- * Transcribe Audio Blob using Groq Whisper Large v3 Turbo
+ * Transcribe Audio Blob using Groq Whisper Large v3 Turbo (with fallback to v3)
  */
 export async function transcribeWithGroqWhisper(apiKey, audioBlob, language = 'hi') {
   if (!apiKey) {
     throw new Error('Groq API Key is missing. Please enter your free Groq API key.');
   }
 
-  const formData = new FormData();
-  formData.append('file', audioBlob, 'counter_recording.webm');
-  formData.append('model', 'whisper-large-v3-turbo');
-  // Bias Whisper prompt for common Indian grocery & dukandaar vocabulary
-  formData.append('prompt', 'Kirana shop, Ramesh bhai, Sunita bhabhi, cheeni, tel, dudh, chawal, atta, dal, udhaar, jama, khata, rupaye, kilo, packet');
-  if (language === 'hi') {
-    formData.append('language', 'hi');
+  const whisperModels = ['whisper-large-v3-turbo', 'whisper-large-v3'];
+  let lastError = null;
+
+  for (const model of whisperModels) {
+    try {
+      const formData = new FormData();
+      formData.append('file', audioBlob, 'counter_recording.webm');
+      formData.append('model', model);
+      formData.append('prompt', 'Kirana shop, Ramesh bhai, Sunita bhabhi, cheeni, tel, dudh, chawal, atta, dal, udhaar, jama, khata, rupaye, kilo, packet');
+      if (language === 'hi') {
+        formData.append('language', 'hi');
+      }
+
+      const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey.trim()}`
+        },
+        body: formData
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return (data.text || '').trim();
+      } else {
+        const errData = await response.json().catch(() => ({}));
+        lastError = new Error(errData.error?.message || `Whisper error ${response.status}`);
+      }
+    } catch (e) {
+      lastError = e;
+    }
   }
 
-  const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey.trim()}`
-    },
-    body: formData
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || `Groq Whisper Error: ${response.status} ${response.statusText}`);
-  }
-
-  const data = await response.json();
-  return (data.text || '').trim();
+  throw lastError || new Error('Whisper audio transcription failed on Groq.');
 }
 
 /**
- * Extract structured ledger transaction JSON from transcript using Groq Llama 3.3 70B
+ * Extract structured ledger transaction JSON from transcript using Groq models
  */
 export async function parseWithGroqLlama({ apiKey, transcript, customers = [], rateCard = [], language = 'hi' }) {
   if (!apiKey) {
@@ -99,33 +117,41 @@ RAW SPOKEN TRANSCRIPT FROM MICROPHONE:
 "${transcript}"
 `;
 
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey.trim()}`
-    },
-    body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
-      temperature: 0.1,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: GALLA_SYSTEM_PROMPT },
-        { role: 'user', content: userContext }
-      ]
-    })
-  });
+  let lastError = null;
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || `Groq Llama Error: ${response.status} ${response.statusText}`);
+  for (const model of CANDIDATE_CHAT_MODELS) {
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey.trim()}`
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.1,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: GALLA_SYSTEM_PROMPT },
+            { role: 'user', content: userContext }
+          ]
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const rawContent = data.choices?.[0]?.message?.content;
+        if (rawContent) {
+          return JSON.parse(rawContent);
+        }
+      } else {
+        const errData = await response.json().catch(() => ({}));
+        lastError = new Error(errData.error?.message || `Groq Error ${response.status}`);
+      }
+    } catch (e) {
+      lastError = e;
+    }
   }
 
-  const data = await response.json();
-  const rawContent = data.choices?.[0]?.message?.content;
-  if (!rawContent) {
-    throw new Error('Empty response received from Groq AI.');
-  }
-
-  return JSON.parse(rawContent);
+  throw lastError || new Error('Groq AI parsing failed on all candidate models.');
 }
