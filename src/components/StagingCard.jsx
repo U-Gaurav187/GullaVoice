@@ -5,7 +5,11 @@ import {
   Volume2, 
   AlertTriangle, 
   UserCheck, 
-  Sparkles
+  Sparkles,
+  Layers,
+  CheckCircle2,
+  XCircle,
+  HelpCircle
 } from 'lucide-react';
 
 export default function StagingCard({
@@ -94,6 +98,61 @@ export default function StagingCard({
               {language === 'hi' ? 'कीमत जाँच चेतावनी (Accent Price Alert):' : 'Rate Card Price Warning:'}
             </strong>
             <span>{stagedDraft.price_sanity_note}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Discourse Bifurcation Breakdown (Hackathon Feature) */}
+      {stagedDraft.discourse_clauses && stagedDraft.discourse_clauses.length > 0 && (
+        <div className="mb-4 p-3.5 rounded-2xl bg-stone-100/90 border border-stone-200 shadow-xs">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold text-stone-700 flex items-center gap-1.5 uppercase tracking-wider">
+              <Layers className="w-3.5 h-3.5 text-orange-600" />
+              <span>{language === 'hi' ? 'दुकान की बातचीत का विभाजन (Discourse Split):' : 'Speech Discourse Analysis:'}</span>
+            </span>
+            <span className="text-[10px] text-stone-500 font-mono">
+              {stagedDraft.discourse_clauses.filter(c => c.action === 'IGNORE').length} chatter filtered
+            </span>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {stagedDraft.discourse_clauses.map((clause, idx) => {
+              if (clause.action === 'TARGET' || clause.type === 'LEDGER_HEADER') {
+                return (
+                  <span 
+                    key={idx} 
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-amber-100 text-amber-900 border border-amber-300 text-xs font-bold font-devanagari"
+                    title="खाता लक्ष्य (Target Customer)"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
+                    <span>🎯 {clause.utterance}</span>
+                  </span>
+                );
+              }
+              if (clause.action === 'RECORD' || clause.type === 'COMMIT_COMMAND') {
+                return (
+                  <span 
+                    key={idx} 
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs font-bold font-devanagari"
+                    title="खाता प्रविष्टि (Recorded Ledger Item)"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>📝 {clause.utterance}</span>
+                  </span>
+                );
+              }
+              // Ignored side-chatter, helper commands, or queries
+              return (
+                <span 
+                  key={idx} 
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-xl bg-stone-200/90 text-stone-500 line-through text-[11px] font-medium font-devanagari"
+                  title={`${clause.type || 'Chatter'}: Ignored`}
+                >
+                  <XCircle className="w-3 h-3 text-stone-400" />
+                  <span>{clause.utterance}</span>
+                </span>
+              );
+            })}
           </div>
         </div>
       )}

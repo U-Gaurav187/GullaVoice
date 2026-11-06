@@ -62,5 +62,17 @@ export const INITIAL_CUSTOMERS = [
     netBalance: 180,
     lastUpdated: '2026-11-04T16:30:00Z',
     notes: 'Tailor shop opposite temple'
+  },
+  {
+    id: 'CUST_06',
+    name: 'Vaishali',
+    hindiName: 'वैशाली',
+    aliases: ['Vaishali', 'Vaisali', 'Vaishali Bhabhi', 'वैशाली', 'वैसाली'],
+    phone: '+91 98206 67890',
+    totalUdhaar: 0,
+    totalJama: 0,
+    netBalance: 0,
+    lastUpdated: '2026-11-06T12:00:00Z',
+    notes: 'Regular local customer'
   }
 ];

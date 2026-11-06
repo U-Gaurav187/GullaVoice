@@ -180,6 +180,48 @@ export default function App() {
       parsedResult = parseKiranaVoiceLocally(transcriptText, customers, rateCard);
     }
 
+    // Enrich items with Store Rate Card pricing if price was 0 or uncalculated
+    if (parsedResult.items && parsedResult.items.length > 0) {
+      let computedSum = 0;
+      parsedResult.items = parsedResult.items.map(item => {
+        const itemLower = (item.name || '').toLowerCase();
+        const rcMatch = rateCard.find(rc => 
+          rc.name.toLowerCase() === itemLower ||
+          rc.hindiName === item.name ||
+          (rc.aliases && rc.aliases.some(a => itemLower.includes(a.toLowerCase()) || a.toLowerCase().includes(itemLower)))
+        );
+
+        let qtyNum = parseFloat(item.quantity);
+        if (isNaN(qtyNum)) {
+          if (/दो|do|two|jo/i.test(item.quantity || '')) qtyNum = 2;
+          else if (/एक|ek|one/i.test(item.quantity || '')) qtyNum = 1;
+          else if (/आधा|aadha|half/i.test(item.quantity || '')) qtyNum = 0.5;
+          else if (/पाव|pav|pao/i.test(item.quantity || '')) qtyNum = 0.25;
+          else qtyNum = 1;
+        }
+
+        let price = Number(item.calculated_price_inr) || 0;
+        if (price === 0 && rcMatch) {
+          price = Math.round(rcMatch.unitPrice * qtyNum);
+        }
+        computedSum += price;
+        return {
+          ...item,
+          calculated_price_inr: price
+        };
+      });
+
+      if (!parsedResult.total_amount_inr || Number(parsedResult.total_amount_inr) === 0) {
+        parsedResult.total_amount_inr = computedSum;
+      }
+
+      // Update Hindi readback if it originally had zero
+      if (parsedResult.total_amount_inr > 0 && parsedResult.tts_hindi_readback && parsedResult.tts_hindi_readback.includes('शून्य')) {
+        const itemSummaries = parsedResult.items.map(i => `${i.quantity} ${i.name}`).join(' और ');
+        parsedResult.tts_hindi_readback = `${parsedResult.matched_customer_name || 'ग्राहक'} के खाते में ${itemSummaries}, कुल ₹${parsedResult.total_amount_inr} उधार। क्या इसे सेव करें?`;
+      }
+    }
+
     const isNoiseOnly = parsedResult.intent === 'NOISE_ONLY' || 
       ((!parsedResult.items || parsedResult.items.length === 0) && Number(parsedResult.total_amount_inr) === 0);
 

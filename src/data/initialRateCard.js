@@ -103,5 +103,35 @@ export const INITIAL_RATE_CARD = [
     unit: 'nag',
     unitPrice: 35,
     category: 'Personal Care'
+  },
+  {
+    id: 'ITEM_11',
+    name: 'Aloo',
+    displayName: 'Aloo (Potatoes)',
+    hindiName: 'आलू',
+    aliases: ['aloo', 'aalu', 'potato', 'potatoes', 'आलू', 'आलो'],
+    unit: 'kg',
+    unitPrice: 30,
+    category: 'Vegetables'
+  },
+  {
+    id: 'ITEM_12',
+    name: 'Pyaz',
+    displayName: 'Pyaz (Onions)',
+    hindiName: 'प्याज़',
+    aliases: ['pyaz', 'pyaaz', 'onion', 'kanda', 'प्याज़', 'कांदा'],
+    unit: 'kg',
+    unitPrice: 40,
+    category: 'Vegetables'
+  },
+  {
+    id: 'ITEM_13',
+    name: 'Rawa',
+    displayName: 'Rawa / Suji (Semolina)',
+    hindiName: 'रवा / सूजी',
+    aliases: ['rawa', 'rava', 'suji', 'sooji', 'रवा', 'सूजी'],
+    unit: 'kg',
+    unitPrice: 36,
+    category: 'Grains'
   }
 ];

@@ -7,25 +7,42 @@
 export const GALLA_SYSTEM_PROMPT = `You are an expert Indian Kirana store ledger AI ('Galla AI').
 Your job is to parse spoken voice commands from shopkeepers sitting at noisy cash counters.
 
-RULES:
-1. NOISE & DISTURBANCE FILTERING:
-   Strip out all ambient counter side-chatter, customer haggling (e.g., 'dudh 40 ka ho gaya', 'wo 2 rupee ki hai'), shouts to store helpers ('chhotu packet de de', 'chhotu chai le aa'), and filler words even if there is no resumption marker like 'kaha tha me'.
+OPERATIONAL KIRANA DISCOURSE BIFURCATION RULES (CRITICAL):
+1. DISCOURSE BIFURCATION (Analyze FIRST before extracting items):
+   Break the raw transcript into discourse clauses inside the "discourse_clauses" array:
+   - "LEDGER_HEADER": Opening customer account reference (e.g. "वैशाली के खाते में", "Ramesh bhai ko", "Sharma ji ke khate mein"). Action: "TARGET".
+   - "COMMIT_COMMAND": Accounting instructions directly governed by recording imperatives like "likh do" (लिख दो), "chadha do" (चढ़ा दो), "khate mein daalo", "udhaar likho", "jama karo", "jama likho". Action: "RECORD".
+   - "HELPER_DISPATCH": Physical counter dispatch commands to workers/helpers like "Chhotu packet de de", "Chhotu 2 kilo aloo de de", "chai le aa", "pack kar". Action: "IGNORE" (This is a physical store command, NOT a ledger entry!).
+   - "CUSTOMER_INQUIRY": Conversational banter, questions, or future queries to customers like "leke aayegi kya?", "chahiye kya?", "kitne ka hai?", "aur kuch nahi hai". Action: "IGNORE" (Conversational inquiry, NOT a ledger entry!).
+   - "PERSONAL_ASIDE": Family or personal ambient talk like "mummy khane mein kya bana hai", "mobile rakh yaar", "khulle nahi hai". Action: "IGNORE".
 
-2. CUSTOMER MATCHING:
-   Match accented spoken names (e.g., 'Rames', 'Ramess', 'Rameshwar', 'Sarma') against the provided existing_customers list.
+2. VERB-ANCHORING FOR ITEMS:
+   An item MUST ONLY be extracted into "items" if it belongs to a "COMMIT_COMMAND" governed by a recording imperative ("likh do", "chadha do", "daalo", "udhaar", "jama").
+   Items mentioned in helper dispatch ("Chhotu 2 kilo aloo de de") or customer inquiries ("2 kilo rawa leke aayegi kya") MUST NEVER be added to "items"!
 
-3. ACCENT NUMBER & COLLOQUIAL DISAMBIGUATION:
-   Convert colloquial Hindi/Indian terms:
-   - 'dedh sau' = 150, 'dhai sau' = 250, 'sawa sau' = 125, 'paune do sau' = 175
-   - 'aadha kilo' = 0.5 kg, 'pav kilo' / 'pao' = 0.25 kg, 'paun kilo' = 0.75 kg, 'dedh kilo' = 1.5 kg
-   - Catch phonetically ambiguous numbers (15 vs 50 vs 500) using the store rate card.
+3. MULTI-ITEM CHAINING:
+   When multiple items are listed before a commit verb (e.g. "4 kilo rice, 5 kilo dal aur 2 kilo aloo likh do"), all chained items belong to the commit command.
 
-4. DUAL-LANGUAGE VOICE READBACK:
-   - If language is 'hi', generate 'tts_readback' in clear, natural Devanagari Hindi (e.g. 'रमेश भाई के खाते में दो किलो चीनी और एक पैकेट तेल, कुल दो सौ अट्ठाईस रुपये उधार। क्या इसे सेव करें?').
-   - If language is 'en', generate 'tts_readback' in natural Indian English (e.g. 'Added 2 kg Sugar and 1 packet Oil to Ramesh Bhai ledger, total 228 rupees credit. Should I save this?').
+4. ACCENT & PHONETIC DISAMBIGUATION:
+   - "jo kilo" / "jo" before an item = "do kilo" (2 kg) accent slip.
+   - "dedh sau" = 150, "dhai sau" = 250, "sawa sau" = 125, "paune do sau" = 175
+   - "aadha kilo" = 0.5 kg, "pav kilo" / "pao" = 0.25 kg, "paun kilo" = 0.75 kg, "dedh kilo" = 1.5 kg
+   - Match spoken names (e.g. "वैसाली" -> "Vaishali", "Rames" -> "Ramesh Bhai") against existing_customers list.
+   - Match items against store rate card and compute calculated_price_inr.
 
-Respond ONLY with valid JSON conforming strictly to this schema:
+5. DUAL-LANGUAGE VOICE READBACK:
+   - "tts_hindi_readback": Clear, natural Devanagari Hindi readback confirming the customer name, items, and total amount.
+   - "tts_readback": English/Hinglish readback.
+
+Respond strictly in valid JSON conforming to this schema:
 {
+  "discourse_clauses": [
+    {
+      "utterance": "string",
+      "type": "LEDGER_HEADER | COMMIT_COMMAND | HELPER_DISPATCH | CUSTOMER_INQUIRY | PERSONAL_ASIDE",
+      "action": "TARGET | RECORD | IGNORE"
+    }
+  ],
   "intent": "CREATE_UDHAAR | RECEIVE_JAMA | CHECK_BALANCE | NOISE_ONLY",
   "customer_spoken": "string",
   "matched_customer_name": "string",
@@ -41,8 +58,8 @@ Respond ONLY with valid JSON conforming strictly to this schema:
   "total_amount_inr": 0,
   "transaction_type": "UDHAAR | JAMA",
   "ignored_side_chatter": "string",
-  "tts_readback": "string (Voice confirmation sentence in requested language)",
-  "tts_hindi_readback": "string (Always provide Hindi version as well)"
+  "tts_readback": "string",
+  "tts_hindi_readback": "string"
 }`;
 
 const CANDIDATE_CHAT_MODELS = [
@@ -70,8 +87,22 @@ export async function transcribeWithGroqWhisper(apiKey, audioBlob, language = 'h
       const filename = isWav ? 'counter_recording.wav' : 'counter_recording.webm';
       formData.append('file', audioBlob, filename);
       formData.append('model', model);
-      // Natural language auto-detection: allows seamless Hinglish, Hindi, and English counter speech
-      formData.append('prompt', 'Kirana ledger, Ramesh bhai, Sunita bhabhi, Sharma ji, cheeni, tel, dudh, chawal, atta, dal, udhaar, jama, khata, rupaye, kilo, packet');
+
+      // CRITICAL: Explicitly set language so Whisper never misidentifies Hindi as Arabic/Turkish/Urdu
+      formData.append('language', language === 'en' ? 'en' : 'hi');
+
+      // Bilingual prompt with Devanagari + Romanized to anchor Whisper's decoder in correct script
+      formData.append('prompt',
+        'किराना खाता लेजर। रमेश भाई, सुनीता भाभी, शर्मा जी, वैशाली। ' +
+        'चीनी, तेल, दूध, चावल, आटा, दाल, आलू, प्याज़। ' +
+        'उधार लिख दो, जमा करो, खाते में डालो, बाकी, हिसाब। ' +
+        'दो किलो, एक पैकेट, आधा किलो, पाव किलो, ढाई सौ, डेढ़ सौ, सवा सौ।'
+      );
+
+      // temperature=0 eliminates hallucination on quiet/noisy audio
+      formData.append('temperature', '0');
+      // Get word-level timestamps for debugging
+      formData.append('response_format', 'verbose_json');
 
       const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
         method: 'POST',
@@ -83,6 +114,11 @@ export async function transcribeWithGroqWhisper(apiKey, audioBlob, language = 'h
 
       if (response.ok) {
         const data = await response.json();
+        // verbose_json returns segments, language, duration alongside text
+        console.log(`🗣️ Whisper [${model}] detected language: "${data.language || 'auto'}", duration: ${data.duration || '?'}s, segments: ${data.segments?.length || 0}`);
+        if (data.segments && data.segments.length > 0) {
+          console.log('📊 Whisper segments:', data.segments.map(s => `[${s.start?.toFixed(1)}s-${s.end?.toFixed(1)}s] "${s.text}" (no_speech_prob=${s.no_speech_prob?.toFixed(3)})`).join(' | '));
+        }
         return (data.text || '').trim();
       } else {
         const errData = await response.json().catch(() => ({}));

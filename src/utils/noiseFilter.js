@@ -24,8 +24,10 @@ export const DISTURBANCE_PATTERNS = [
   /chhotu\s+dhyan\s+kidhar\s+hai\s+tera/gi,
   /chhotu\s+theli\s+de/gi,
   /raju\s+saman\s+rakh\s+de/gi,
+  /(chhotu|raju|bablu)\s+([a-z0-9\u0900-\u097F\s]+?)\s+(de\s+de|de\s+do|pakda\s+de|pack\s+kar)/gi,
+  /छोटू\s+([a-z0-9\u0900-\u097F\s]+?)\s+(दे\s+दे|दे\s+दो|ले\s+आ)/gi,
 
-  // 3. Customer exchange distractions (change, loose coins, return later)
+  // 3. Customer exchange distractions & personal asides
   /are?\s+bhai\s+khulle\s+nahi\s+hai\s+abhi/gi,
   /bhaiya\s+change\s+nahi\s+hai\s+abhi/gi,
   /khulle\s+paise\s+nahi\s+hai/gi,
@@ -35,6 +37,11 @@ export const DISTURBANCE_PATTERNS = [
   /kal\s+aana/gi,
   /are\s+sunita\s+bhabhi\s+kal\s+aana/gi,
   /baad\s+me\s+aana/gi,
+  /(mummy|मम्मी)\s*,\s*(खाने\s+में\s+क्या\s+बना\s+है|khane\s+mein\s+kya\s+bana\s+hai)/gi,
+  /(mobile|मोबाइल)\s+रख\s*(यार|दे)?/gi,
+  /(मोबाइल|mobile)\s+rakh\s*(yaar|de)?/gi,
+  /(अच्छा|acha)\s*,\s*(और\s+कुछ\s+नहीं\s+है|aur\s+kuch\s+nahi\s+hai)/gi,
+  /([a-z0-9\u0900-\u097F\s]+?)\s+(लेके\s+आएगी\s+क्या|लेक्याना\s+आगे|leke\s+aayegi\s+kya)\s*\??/gi,
 
   // 4. Shopkeeper transition & filler hesitation phrases
   /ha\s+kaha\s+tha\s+me/gi,

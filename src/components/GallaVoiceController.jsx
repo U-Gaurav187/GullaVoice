@@ -163,6 +163,15 @@ export default function GallaVoiceController({
     }
   };
 
+  const handleDownloadWav = () => {
+    if (audioPreviewUrl) {
+      const a = document.createElement('a');
+      a.href = audioPreviewUrl;
+      a.download = `gallavoice_debug_${Date.now()}.wav`;
+      a.click();
+    }
+  };
+
   const handleFormSubmit = (e) => {
     e.preventDefault();
     if (!typedInput.trim() || isProcessing) return;
@@ -318,6 +327,14 @@ export default function GallaVoiceController({
           >
             <Play className="w-3 h-3 fill-white" />
             <span>{language === 'hi' ? 'आवाज़ सुनें' : 'Play Audio'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleDownloadWav}
+            className="px-2 py-1 rounded-lg bg-stone-500 hover:bg-stone-600 text-white font-bold text-[11px] transition-colors cursor-pointer shadow-xs"
+            title="Download WAV for debugging"
+          >
+            ⬇ WAV
           </button>
         </div>
       )}
