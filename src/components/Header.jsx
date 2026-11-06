@@ -30,8 +30,12 @@ export default function Header({
     <header className="bg-white border-b border-stone-200 sticky top-0 z-30 shadow-xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 flex items-center justify-between gap-4">
         {/* Brand */}
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center text-white shadow-xs">
+        <div 
+          onClick={() => onSelectTab && onSelectTab('VOICE')}
+          className="flex items-center gap-3 shrink-0 cursor-pointer select-none group"
+          title="माइक काउंटर पर जाएं (Go to Voice Counter)"
+        >
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center text-white shadow-xs group-hover:scale-105 transition-transform">
             <Mic className="w-5 h-5" />
           </div>
           <div>
@@ -47,8 +51,23 @@ export default function Header({
           </div>
         </div>
 
-        {/* PRIMARY CENTER TABS: Transactions & Customer Khata (Prominently in Header!) */}
+        {/* PRIMARY CENTER TABS: Voice Counter (Home) | Transactions | Customer Khata */}
         <div className="flex items-center bg-stone-100 p-1 rounded-2xl border border-stone-200/90 shadow-2xs">
+          {/* Voice Counter (Home) */}
+          <button
+            type="button"
+            onClick={() => onSelectTab && onSelectTab('VOICE')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              activeTab === 'VOICE'
+                ? 'bg-orange-600 text-white shadow-xs'
+                : 'text-stone-600 hover:text-stone-900'
+            }`}
+          >
+            <Mic className={`w-3.5 h-3.5 ${activeTab === 'VOICE' ? 'text-white' : 'text-stone-500'}`} />
+            <span>{isHindi ? 'माइक काउंटर' : 'Voice Counter'}</span>
+          </button>
+
+          {/* Transactions Tab */}
           <button
             type="button"
             onClick={() => onSelectTab && onSelectTab('TRANSACTIONS')}
@@ -67,6 +86,7 @@ export default function Header({
             </span>
           </button>
 
+          {/* Customers Tab */}
           <button
             type="button"
             onClick={() => onSelectTab && onSelectTab('CUSTOMERS')}
@@ -86,7 +106,7 @@ export default function Header({
           </button>
         </div>
 
-        {/* Live Counters & Controls */}
+        {/* Live Counters & Controls (Cleaned & Polished for Production) */}
         <div className="flex items-center gap-2.5 shrink-0">
           {/* Live Counters */}
           <div className="hidden lg:flex items-center gap-2 text-xs font-semibold">
@@ -110,21 +130,6 @@ export default function Header({
           >
             <Languages className="w-3.5 h-3.5 text-orange-600" />
             <span className="text-[11px]">{isHindi ? 'हिन्दी' : 'English'}</span>
-          </button>
-
-          {/* AI Key Status Badge */}
-          <button
-            onClick={onOpenSettings}
-            className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
-              hasKey
-                ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                : 'bg-amber-50 border-amber-300 text-amber-800 animate-pulse'
-            }`}
-            title="Configure AI API Key"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-            <span className="hidden xl:inline text-[11px]">{hasKey ? 'Groq Active' : 'Set Key'}</span>
-            <span className={`w-2 h-2 rounded-full ${hasKey ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
           </button>
 
           {/* Rate Card */}

@@ -46,7 +46,7 @@ export default function App() {
   const [newestTxnId, setNewestTxnId] = useState(null);
 
   // Tabs & Modals
-  const [activeTab, setActiveTab] = useState('TRANSACTIONS'); // 'TRANSACTIONS' | 'CUSTOMERS'
+  const [activeTab, setActiveTab] = useState('VOICE'); // 'VOICE' | 'TRANSACTIONS' | 'CUSTOMERS'
   const [isRateCardOpen, setIsRateCardOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLanguageModalOpen, setIsLanguageModalOpen] = useState(false);
@@ -229,7 +229,7 @@ export default function App() {
     if (parsedResult.items && parsedResult.items.length > 0) {
       let computedSum = 0;
       parsedResult.items = parsedResult.items.map(item => {
-        const itemLower = (item.name || '').toLowerCase();
+        const itemLower = (item.name || '').toLowerCase().trim();
         const rcMatch = rateCard.find(rc => 
           rc.name.toLowerCase() === itemLower ||
           rc.hindiName === item.name ||
@@ -255,12 +255,33 @@ export default function App() {
         }
 
         let price = Number(item.calculated_price_inr) || 0;
+        let unitPrice = item.unitPrice || 0;
+
         if (price === 0 && rcMatch) {
-          price = Math.round(rcMatch.unitPrice * qtyNum);
+          unitPrice = rcMatch.unitPrice;
+          price = Math.round(unitPrice * qtyNum);
+        } else if (price === 0) {
+          // Dynamic Kirana category fallback (ensure NO item ever has ₹0)
+          if (/वैसलीन|vaseline|क्रीम|cream/i.test(itemLower)) unitPrice = 45;
+          else if (/साबुन|soap/i.test(itemLower)) unitPrice = 35;
+          else if (/शैम्पू|shampoo/i.test(itemLower)) unitPrice = 2;
+          else if (/तेल|oil/i.test(itemLower)) unitPrice = 140;
+          else if (/बिस्कुट|biscuit/i.test(itemLower)) unitPrice = 20;
+          else if (/नमकीन|चिप्स|chips/i.test(itemLower)) unitPrice = 40;
+          else if (/दाल|dal/i.test(itemLower)) unitPrice = 120;
+          else if (/कांदा|प्याज|टमाटर|आलू|potato|onion/i.test(itemLower)) unitPrice = 40;
+          else unitPrice = 40; // general market baseline
+          
+          price = Math.round(unitPrice * qtyNum);
+          item.accent_correction_note = `अनुमानित दर: ₹${unitPrice}`;
+        } else if (unitPrice === 0 && qtyNum > 0) {
+          unitPrice = Math.round(price / qtyNum);
         }
+
         computedSum += price;
         return {
           ...item,
+          unitPrice: unitPrice || (rcMatch ? rcMatch.unitPrice : 0),
           calculated_price_inr: price
         };
       });
@@ -345,31 +366,70 @@ export default function App() {
     let customerName = stagedDraft.matched_customer_name || stagedDraft.customer_spoken || 'Walk-in Customer';
 
     let updatedCustomers = [...customers];
-    let customerIndex = updatedCustomers.findIndex(c => c.id === targetCustomerId);
+    let customerIndex = -1;
 
-    if (customerIndex === -1 && targetCustomerId) {
-      customerIndex = updatedCustomers.findIndex(c => c.name.toLowerCase() === customerName.toLowerCase());
+    // 1. Direct ID lookup
+    if (targetCustomerId) {
+      customerIndex = updatedCustomers.findIndex(c => c.id === targetCustomerId);
+    }
+
+    // 2. Exact English or Hindi Name or Aliases lookup
+    if (customerIndex === -1 && customerName) {
+      const lowerTarget = customerName.toLowerCase().trim();
+      customerIndex = updatedCustomers.findIndex(c => 
+        c.name.toLowerCase() === lowerTarget ||
+        (c.hindiName && c.hindiName.toLowerCase() === lowerTarget) ||
+        (c.aliases && c.aliases.some(a => a.toLowerCase() === lowerTarget))
+      );
+    }
+
+    // 3. Spoken Name lookup
+    if (customerIndex === -1 && stagedDraft.customer_spoken) {
+      const lowerSpoken = stagedDraft.customer_spoken.toLowerCase().trim();
+      customerIndex = updatedCustomers.findIndex(c => 
+        c.name.toLowerCase() === lowerSpoken ||
+        (c.hindiName && c.hindiName.toLowerCase() === lowerSpoken) ||
+        (c.aliases && c.aliases.some(a => a.toLowerCase() === lowerSpoken))
+      );
+    }
+
+    // 4. Phonetic & Fuzzy lookup (prevents duplicate accounts on accent slips)
+    if (customerIndex === -1) {
+      const pMatch = matchCustomerPhonetically(customerName || stagedDraft.customer_spoken, updatedCustomers, 0.58);
+      if (pMatch.isMatch && pMatch.customer) {
+        customerIndex = updatedCustomers.findIndex(c => c.id === pMatch.customer.id);
+      }
     }
 
     const amount = Number(stagedDraft.total_amount_inr) || 0;
     const isUdhaar = stagedDraft.transaction_type === 'UDHAAR';
 
     if (customerIndex >= 0) {
+      // ✅ Existing customer found: ADD to their previous balance!
       const existing = updatedCustomers[customerIndex];
-      const newUdhaar = isUdhaar ? existing.totalUdhaar + amount : existing.totalUdhaar;
-      const newJama = !isUdhaar ? existing.totalJama + amount : existing.totalJama;
+      const newUdhaar = isUdhaar ? (existing.totalUdhaar || 0) + amount : (existing.totalUdhaar || 0);
+      const newJama = !isUdhaar ? (existing.totalJama || 0) + amount : (existing.totalJama || 0);
       const newNet = newUdhaar - newJama;
+
+      // Consolidate aliases so future recognition gets even stronger
+      const mergedAliases = Array.from(new Set([
+        ...(existing.aliases || []),
+        customerName,
+        stagedDraft.customer_spoken
+      ].filter(Boolean)));
 
       updatedCustomers[customerIndex] = {
         ...existing,
         totalUdhaar: newUdhaar,
         totalJama: newJama,
         netBalance: newNet,
-        lastUpdated: nowIso
+        lastUpdated: nowIso,
+        aliases: mergedAliases
       };
       targetCustomerId = existing.id;
       customerName = existing.name;
     } else {
+      // Only create new customer if completely novel and unrecognized
       const newCustId = `CUST_${String(updatedCustomers.length + 1).padStart(2, '0')}`;
       const newCustomer = {
         id: newCustId,
@@ -470,11 +530,10 @@ export default function App() {
       />
 
       {/* Main Workspace Layout */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 flex flex-col gap-6">
-        {/* 2-Column Responsive Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* LEFT COLUMN: Clean Minimalist Voice Controller or Staging Card */}
-          <div className="lg:col-span-5 space-y-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 flex flex-col justify-center">
+        {activeTab === 'VOICE' ? (
+          /* THE FULL HERO MIC INTERFACE (DOMINATES SCREEN ON HOME) */
+          <div className="max-w-xl w-full mx-auto space-y-6 animate-in fade-in zoom-in-95 duration-200">
             {stagedDraft ? (
               <StagingCard
                 stagedDraft={stagedDraft}
@@ -497,29 +556,53 @@ export default function App() {
               />
             )}
           </div>
-
-          {/* RIGHT COLUMN: Live Ledger View (Driven directly by Top Header!) */}
-          <div className="lg:col-span-7 flex flex-col space-y-4">
-            {/* Active Tab View */}
-            <div className="h-full">
-              {activeTab === 'TRANSACTIONS' ? (
-                <TransactionsTable
-                  transactions={transactions}
-                  onDeleteTransaction={handleDeleteTransaction}
-                  onSelectTransaction={setSelectedTransaction}
-                  newestTxnId={newestTxnId}
-                  language={currentLanguage}
-                />
-              ) : (
-                <CustomerKhataTable
-                  customers={customers}
-                  onSelectCustomer={setSelectedCustomer}
-                  language={currentLanguage}
-                />
-              )}
+        ) : activeTab === 'TRANSACTIONS' ? (
+          /* TRANSACTIONS TABLE VIEW (ON-DEMAND WHEN USER CLICKS TOP BOX) */
+          <div className="w-full flex flex-col space-y-4 animate-in fade-in duration-200">
+            <div className="flex items-center justify-between bg-white px-5 py-3 rounded-2xl border border-stone-200 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setActiveTab('VOICE')}
+                className="inline-flex items-center gap-2 text-xs font-bold text-stone-700 hover:text-orange-600 transition-colors cursor-pointer group"
+              >
+                <span className="text-base group-hover:-translate-x-0.5 transition-transform">←</span>
+                <span>{currentLanguage === 'hi' ? 'वापस माइक काउंटर पर जाएं' : 'Back to Voice Counter'}</span>
+              </button>
+              <div className="text-xs font-semibold text-stone-500">
+                {currentLanguage === 'hi' ? 'कुल प्रविष्टियां:' : 'Total Records:'} <span className="font-bold text-stone-800">{transactions.length}</span>
+              </div>
             </div>
+            <TransactionsTable
+              transactions={transactions}
+              onDeleteTransaction={handleDeleteTransaction}
+              onSelectTransaction={setSelectedTransaction}
+              newestTxnId={newestTxnId}
+              language={currentLanguage}
+            />
           </div>
-        </div>
+        ) : (
+          /* CUSTOMERS KHATA TABLE VIEW (ON-DEMAND WHEN USER CLICKS TOP BOX) */
+          <div className="w-full flex flex-col space-y-4 animate-in fade-in duration-200">
+            <div className="flex items-center justify-between bg-white px-5 py-3 rounded-2xl border border-stone-200 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setActiveTab('VOICE')}
+                className="inline-flex items-center gap-2 text-xs font-bold text-stone-700 hover:text-orange-600 transition-colors cursor-pointer group"
+              >
+                <span className="text-base group-hover:-translate-x-0.5 transition-transform">←</span>
+                <span>{currentLanguage === 'hi' ? 'वापस माइक काउंटर पर जाएं' : 'Back to Voice Counter'}</span>
+              </button>
+              <div className="text-xs font-semibold text-stone-500">
+                {currentLanguage === 'hi' ? 'कुल ग्राहक खाते:' : 'Total Customer Accounts:'} <span className="font-bold text-stone-800">{customers.length}</span>
+              </div>
+            </div>
+            <CustomerKhataTable
+              customers={customers}
+              onSelectCustomer={setSelectedCustomer}
+              language={currentLanguage}
+            />
+          </div>
+        )}
       </main>
 
       {/* Purchase Details Modal (Shows exact purchases and exact time) */}
