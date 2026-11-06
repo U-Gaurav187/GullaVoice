@@ -97,20 +97,31 @@ class SpeechTTSManager {
     };
 
     utterance.onerror = (e) => {
-      console.warn('SpeechSynthesis error:', e);
+      // 'interrupted' or 'canceled' happens normally in Chromium when stopping previous audio
+      if (e.error === 'interrupted' || e.error === 'canceled') {
+        this.isSpeaking = false;
+        if (this.onStateChange) this.onStateChange(false);
+        return;
+      }
+      console.warn('SpeechSynthesis notice:', e.error || e);
       this.isSpeaking = false;
       if (this.onStateChange) this.onStateChange(false);
       if (onComplete) onComplete();
     };
 
     this.currentUtterance = utterance;
-    try {
-      this.synth.speak(utterance);
-    } catch (err) {
-      console.error('Failed to trigger TTS:', err);
-      this.isSpeaking = false;
-      if (this.onStateChange) this.onStateChange(false);
-    }
+    // 50ms delay lets Chromium audio output channel completely reset after cancel()
+    setTimeout(() => {
+      try {
+        if (this.synth) {
+          this.synth.speak(utterance);
+        }
+      } catch (err) {
+        console.warn('Failed to trigger TTS:', err);
+        this.isSpeaking = false;
+        if (this.onStateChange) this.onStateChange(false);
+      }
+    }, 50);
   }
 }
 

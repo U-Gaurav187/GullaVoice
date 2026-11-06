@@ -52,14 +52,15 @@ export function calculateSimilarity(str1 = '', str2 = '') {
 }
 
 /**
- * Strips common Indian honorifics and titles to isolate root names
+ * Strips common Indian honorifics and titles to isolate root names in both English and Hindi
  */
 export function stripHonorifics(name = '') {
   if (!name) return '';
   return name
     .toLowerCase()
-    .replace(/\b(bhai|bhabhi|ji|bhaiya|babu|seth|uncle|devi|aunty|didi|sahab|saab|auto|auto wala|tailor)\b/gi, '')
-    .replace(/[^a-z0-9]/gi, ' ')
+    .replace(/\b(bhai|bhabhi|ji|bhaiya|babu|seth|uncle|devi|aunty|didi|sahab|saab|auto|auto wala|tailor|ke|ka|ko)\b/gi, '')
+    .replace(/(भाई|भाभी|जी|भैया|बाबू|सेठ|दीदी|साहब|टेलर|ऑटो|के|का|को|की|खाते|में)/gi, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }

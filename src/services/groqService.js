@@ -23,11 +23,24 @@ OPERATIONAL KIRANA DISCOURSE BIFURCATION RULES (CRITICAL):
 3. MULTI-ITEM CHAINING:
    When multiple items are listed before a commit verb (e.g. "4 kilo rice, 5 kilo dal aur 2 kilo aloo likh do"), all chained items belong to the commit command.
 
-4. ACCENT & PHONETIC DISAMBIGUATION:
-   - "jo kilo" / "jo" before an item = "do kilo" (2 kg) accent slip.
-   - "dedh sau" = 150, "dhai sau" = 250, "sawa sau" = 125, "paune do sau" = 175
-   - "aadha kilo" = 0.5 kg, "pav kilo" / "pao" = 0.25 kg, "paun kilo" = 0.75 kg, "dedh kilo" = 1.5 kg
-   - Match spoken names (e.g. "वैसाली" -> "Vaishali", "Rames" -> "Ramesh Bhai") against existing_customers list.
+4. ACCENT, ACOUSTIC ARTIFACT & PHONETIC DISAMBIGUATION:
+   - Breath clicks, lip smacks, or noisy counter microphones frequently prepend or mutate initial consonants:
+     * "प्रमेश" / "प्रमेश भाई" / "Pramesh" / "Rames" -> MUST MATCH to "Ramesh Bhai" (CUST_01)
+     * "मुषाली" / "Maishali" / "Mushali" / "मैशाली" / "वैसाली" -> MUST MATCH to "Vaishali" (CUST_06)
+     * "पार्थे" / "Parthe" -> MUST MATCH to "Parth" (CUST_07)
+     * "पिंटू" / "Pintoo" -> MUST MATCH to "Pintu Auto" (CUST_03)
+     * "शर्मा" / "Sarma" -> MUST MATCH to "Sharma Ji" (CUST_04)
+   - Accent & Colloquial grocery items:
+     * "कांदा" / "kanda" = Pyaz (Onions)
+     * "दनिया" / "हरा दनिया" = Hara Dhania (Coriander)
+     * "टामाटर" = Tamatar (Tomatoes)
+     * "केडा चिप्स" = Kela Chips (Banana Chips)
+     * "तिल्ली का तेल" = Tilli / Mustard Cooking Oil
+     * "jo kilo" / "jo" / "पिलो" before an item = "do kilo" (2 kg) accent slip.
+     * "tin kilo" / "तिन" = 3 kg
+     * "dedh sau" = 150, "dhai sau" = 250, "sawa sau" = 125, "paune do sau" = 175
+     * "aadha kilo" = 0.5 kg, "pav kilo" / "pao" = 0.25 kg, "paun kilo" = 0.75 kg, "dedh kilo" = 1.5 kg
+   - ALWAYS map distorted or accented spoken customer names to the closest matching customer in the EXISTING CUSTOMERS directory!
    - Match items against store rate card and compute calculated_price_inr.
 
 5. DUAL-LANGUAGE VOICE READBACK:
@@ -91,12 +104,12 @@ export async function transcribeWithGroqWhisper(apiKey, audioBlob, language = 'h
       // CRITICAL: Explicitly set language so Whisper never misidentifies Hindi as Arabic/Turkish/Urdu
       formData.append('language', language === 'en' ? 'en' : 'hi');
 
-      // Bilingual prompt with Devanagari + Romanized to anchor Whisper's decoder in correct script
+      // Bilingual prompt with Devanagari + Romanized to anchor Whisper's decoder in correct script & names
       formData.append('prompt',
-        'किराना खाता लेजर। रमेश भाई, सुनीता भाभी, शर्मा जी, वैशाली। ' +
-        'चीनी, तेल, दूध, चावल, आटा, दाल, आलू, प्याज़। ' +
-        'उधार लिख दो, जमा करो, खाते में डालो, बाकी, हिसाब। ' +
-        'दो किलो, एक पैकेट, आधा किलो, पाव किलो, ढाई सौ, डेढ़ सौ, सवा सौ।'
+        'किराना खाता रोजनामचा। ग्राहक नाम: रमेश भाई, वैशाली, पार्थ, सुनीता भाभी, शर्मा जी, पिंटू, महेश टेलर। ' +
+        'सामान: आलू, कांदा, प्याज, टमाटर, धनिया, हरी मिर्च, केला चिप्स, तिल का तेल, चीनी, तेल, दूध, चावल, आटा, दाल। ' +
+        'मात्रा: दो किलो, तीन किलो, पाव किलो, आधा किलो, एक पैकेट। ' +
+        'आदेश: खाते में लिख दो, उधार लिखो, जमा करो।'
       );
 
       // temperature=0 eliminates hallucination on quiet/noisy audio
@@ -144,7 +157,13 @@ export async function parseWithGroqLlama({ apiKey, transcript, customers = [], r
 LANGUAGE PREFERENCE: ${language === 'hi' ? 'Hindi (Devanagari)' : 'English / Hinglish'}
 
 EXISTING CUSTOMERS IN STORE DATABASE:
-${JSON.stringify(customers.map(c => ({ id: c.id, name: c.name, aliases: c.aliases })), null, 2)}
+${JSON.stringify(customers.map(c => ({
+  id: c.id,
+  name: c.name,
+  hindiName: c.hindiName,
+  upNativeName: c.upNativeName,
+  aliases: c.aliases
+})), null, 2)}
 
 STORE RATE CARD (Price per unit in INR):
 ${JSON.stringify(rateCard.map(r => ({ name: r.name, unitPrice: r.unitPrice, unit: r.unit, aliases: r.aliases })), null, 2)}

@@ -72,27 +72,31 @@ export const storage = {
   getCustomers: () => {
     try {
       const dataV2 = localStorage.getItem(STORAGE_KEYS.CUSTOMERS);
-      if (dataV2) return JSON.parse(dataV2);
+      let list = dataV2 ? JSON.parse(dataV2) : INITIAL_CUSTOMERS;
 
-      const dataV1 = localStorage.getItem('gallavoice_customers_v1');
-      if (dataV1) {
-        const parsed = JSON.parse(dataV1);
-        const merged = parsed.map(c => {
-          const init = INITIAL_CUSTOMERS.find(ic => ic.id === c.id || ic.name === c.name);
+      // Ensure latest aliases and UP names are synced from INITIAL_CUSTOMERS
+      list = list.map(c => {
+        const init = INITIAL_CUSTOMERS.find(ic => ic.id === c.id || ic.name.toLowerCase() === c.name.toLowerCase());
+        if (init) {
+          const mergedAliases = Array.from(new Set([...(c.aliases || []), ...(init.aliases || [])]));
           return {
             ...c,
-            upNativeName: c.upNativeName || init?.upNativeName || 'मान्य ग्राहक'
+            hindiName: c.hindiName || init.hindiName,
+            upNativeName: c.upNativeName || init.upNativeName,
+            aliases: mergedAliases
           };
-        });
-        INITIAL_CUSTOMERS.forEach(ic => {
-          if (!merged.some(c => c.id === ic.id || c.name === ic.name)) {
-            merged.push(ic);
-          }
-        });
-        localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(merged));
-        return merged;
-      }
-      return INITIAL_CUSTOMERS;
+        }
+        return c;
+      });
+
+      // Ensure any missing initial customers (Vaishali, Parth) exist
+      INITIAL_CUSTOMERS.forEach(ic => {
+        if (!list.some(c => c.id === ic.id || c.name.toLowerCase() === ic.name.toLowerCase())) {
+          list.push(ic);
+        }
+      });
+
+      return list;
     } catch (e) {
       console.error('Failed to load customers:', e);
       return INITIAL_CUSTOMERS;
@@ -110,7 +114,13 @@ export const storage = {
   getRateCard: () => {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.RATE_CARD);
-      return data ? JSON.parse(data) : INITIAL_RATE_CARD;
+      let list = data ? JSON.parse(data) : INITIAL_RATE_CARD;
+      INITIAL_RATE_CARD.forEach(initItem => {
+        if (!list.some(item => item.id === initItem.id || item.name.toLowerCase() === initItem.name.toLowerCase())) {
+          list.push(initItem);
+        }
+      });
+      return list;
     } catch (e) {
       console.error('Failed to load rate card:', e);
       return INITIAL_RATE_CARD;

@@ -133,5 +133,45 @@ export const INITIAL_RATE_CARD = [
     unit: 'kg',
     unitPrice: 36,
     category: 'Grains'
+  },
+  {
+    id: 'ITEM_14',
+    name: 'Tamatar',
+    displayName: 'Tamatar (Tomatoes)',
+    hindiName: 'टमाटर',
+    aliases: ['tamatar', 'टामाटर', 'टमाटर', 'tomato', 'tomatoes'],
+    unit: 'kg',
+    unitPrice: 40,
+    category: 'Vegetables'
+  },
+  {
+    id: 'ITEM_15',
+    name: 'Dhania',
+    displayName: 'Hara Dhania (Coriander)',
+    hindiName: 'हरा धनिया',
+    aliases: ['dhania', 'dhaniya', 'hara dhania', 'हरा धनिया', 'दनिया', 'धनिया'],
+    unit: 'kg',
+    unitPrice: 60,
+    category: 'Vegetables'
+  },
+  {
+    id: 'ITEM_16',
+    name: 'Kela Chips',
+    displayName: 'Kela Chips (Banana Chips)',
+    hindiName: 'केला चिप्स',
+    aliases: ['kela chips', 'chips', 'banana chips', 'केला चिप्स', 'केडा चिप्स'],
+    unit: 'pkt',
+    unitPrice: 50,
+    category: 'Snacks'
+  },
+  {
+    id: 'ITEM_17',
+    name: 'Tilli Tel',
+    displayName: 'Tilli / Mustard Oil',
+    hindiName: 'तिल का तेल',
+    aliases: ['tilli tel', 'til tel', 'tilli ka tel', 'तिल्ली का तेल', 'तिल का तेल', 'सरसों तेल'],
+    unit: 'kg',
+    unitPrice: 180,
+    category: 'Oils'
   }
 ];
