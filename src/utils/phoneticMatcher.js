@@ -58,9 +58,9 @@ export function stripHonorifics(name = '') {
   if (!name) return '';
   return name
     .toLowerCase()
-    .replace(/\b(bhai|bhabhi|ji|bhaiya|babu|seth|uncle|devi|aunty|didi|sahab|saab|auto|auto wala|tailor|ke|ka|ko)\b/gi, '')
-    .replace(/(भाई|भाभी|जी|भैया|बाबू|सेठ|दीदी|साहब|टेलर|ऑटो|के|का|को|की|खाते|में)/gi, '')
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\b(bhai|bhabhi|ji|bhaiya|babu|seth|uncle|devi|aunty|didi|sahab|saab|auto|auto wala|tailor|ke|ka|ko|ket)\b/gi, ' ')
+    .replace(/(?:^|\s+)(भाई|भाभी|भैया|बाबू|सेठ|दीदी|साहब|टेलर|ऑटो|के|का|को|की|खाते|में|केट|जी)(?=\s+|$)/gi, ' ')
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -90,7 +90,8 @@ export function toHinglishPhoneticKey(str = '') {
     .replace(/gh+/g, 'g')
     .replace(/th+/g, 't')
     .replace(/dh+/g, 'd')
-    .replace(/bh+/g, 'b')
+    .replace(/bh+/g, 'v')
+    .replace(/b+/g, 'v')
     .replace(/ph+/g, 'f')
     .replace(/w+/g, 'v')
     .replace(/z+/g, 'j')
@@ -145,12 +146,25 @@ export function matchCustomerPhonetically(spokenName = '', customers = [], thres
       const cleanCand = stripHonorifics(cand);
       const phoneticCand = toHinglishPhoneticKey(cand);
 
-      // 1. Exact or Substring match
-      if (cleanSpoken && cleanCand && (cleanCand.includes(cleanSpoken) || cleanSpoken.includes(cleanCand))) {
-        const score = 0.95;
-        if (score > highestScore) {
-          highestScore = score;
-          bestMatch = customer;
+      // 1. Exact Match
+      if (cleanSpoken && cleanCand && cleanSpoken === cleanCand) {
+        return {
+          isMatch: true,
+          customer,
+          confidence: 1.0,
+          matchedName: customer.name,
+          spokenName
+        };
+      }
+
+      // 2. Substring match (require at least 3 characters to avoid false positives on honorific leftovers)
+      if (cleanSpoken && cleanCand && cleanSpoken.length >= 3 && cleanCand.length >= 3) {
+        if (cleanCand.includes(cleanSpoken) || cleanSpoken.includes(cleanCand)) {
+          const score = 0.95;
+          if (score > highestScore) {
+            highestScore = score;
+            bestMatch = customer;
+          }
         }
       }
 

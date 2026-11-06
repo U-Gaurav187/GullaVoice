@@ -173,5 +173,15 @@ export const INITIAL_RATE_CARD = [
     unit: 'kg',
     unitPrice: 180,
     category: 'Oils'
+  },
+  {
+    id: 'ITEM_18',
+    name: 'Sev',
+    displayName: 'Sev / Namkeen / Seb',
+    hindiName: 'सेव',
+    aliases: ['sev', 'save', 'shev', 'namkeen', 'bhujia', 'ratlami sev', 'seb', 'apple', 'सेव', 'सेब', 'नमकीन', 'भुजिया'],
+    unit: 'kg',
+    unitPrice: 160,
+    category: 'Snacks'
   }
 ];

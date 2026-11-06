@@ -17,6 +17,7 @@ const STORAGE_KEYS = {
 export const DEFAULT_SETTINGS = {
   engine: 'LOCAL_ZERO_KEY', // 'LOCAL_ZERO_KEY' | 'GROQ_LLAMA' | 'GEMINI_FLASH'
   groqApiKey: '',
+  wisprFlowApiKey: '',
   geminiApiKey: '',
   audioFeedbackEnabled: true,
   autoReadback: true,

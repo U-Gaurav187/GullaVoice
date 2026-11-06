@@ -95,5 +95,18 @@ export const INITIAL_CUSTOMERS = [
     netBalance: 17,
     lastUpdated: '2026-11-06T21:58:00Z',
     notes: 'College student, grocery runs'
+  },
+  {
+    id: 'CUST_08',
+    name: 'Avinash',
+    hindiName: 'अविनाश',
+    upNativeName: 'लल्ला (अविनाश भैया)',
+    aliases: ['Avinash', 'Abhinash', 'Abinash', 'Avinas', 'Abhinash Ket', 'Abhinash ke', 'अविनाश', 'अभिनाश', 'अविनाश के', 'अभिनाश केट', 'लल्ला', 'अविनाश भैया'],
+    phone: '+91 98208 89012',
+    totalUdhaar: 0,
+    totalJama: 0,
+    netBalance: 0,
+    lastUpdated: '2026-11-06T22:25:00Z',
+    notes: 'Regular customer'
   }
 ];

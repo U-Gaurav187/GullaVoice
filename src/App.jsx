@@ -24,7 +24,9 @@ import PurchaseDetailModal from './components/PurchaseDetailModal.jsx';
 
 import { storage } from './utils/storage.js';
 import { speechTTS } from './utils/speechTTS.js';
+import { matchCustomerPhonetically } from './utils/phoneticMatcher.js';
 import { transcribeWithGroqWhisper, parseWithGroqLlama } from './services/groqService.js';
+import { transcribeWithWisprFlow } from './services/wisprFlowService.js';
 import { parseWithGeminiFlash } from './services/geminiService.js';
 import { parseKiranaVoiceLocally } from './services/localParser.js';
 
@@ -73,6 +75,7 @@ export default function App() {
   useEffect(() => { storage.saveSettings(settings); }, [settings]);
 
   const currentLanguage = settings.speechLanguage === 'en' ? 'en' : 'hi';
+  const effectiveWisprKey = settings.wisprFlowApiKey || import.meta.env.VITE_WISPR_FLOW_API_KEY || '';
   const effectiveGroqKey = settings.groqApiKey || import.meta.env.VITE_GROQ_API_KEY || '';
   const effectiveGeminiKey = settings.geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY || '';
 
@@ -81,10 +84,11 @@ export default function App() {
   const totalJama = customers.reduce((sum, c) => sum + (c.totalJama || 0), 0);
 
   /**
-   * 1. Voice-to-Text via Groq Whisper AI, followed by Llama 3.3 70B extraction
+   * 1. Voice-to-Text via Wispr Flow API (Official Hackathon STT) or Groq Whisper AI,
+   * followed by multi-model resilient extraction (Llama 3.3 70B / Llama 3.1 8B Instant)
    */
   const handleAudioRecorded = async (audioBlob) => {
-    if (!effectiveGroqKey) {
+    if (!effectiveGroqKey && !effectiveWisprKey) {
       setIsLanguageModalOpen(true);
       return;
     }
@@ -95,14 +99,41 @@ export default function App() {
     try {
       console.log('🎙️ Captured audio blob:', audioBlob.size, 'bytes, type:', audioBlob.type);
 
-      // Step 1: AI Speech-to-Text via Whisper Large v3 Turbo
-      const transcript = await transcribeWithGroqWhisper(
-        effectiveGroqKey, 
-        audioBlob, 
-        currentLanguage
-      );
+      let transcript = '';
 
-      console.log('📝 Whisper Transcription:', transcript);
+      // Priority 1: Wispr Flow Voice Interface API (with custom dictionary context)
+      if (effectiveWisprKey) {
+        try {
+          console.log('⚡ Transcribing via Wispr Flow API...');
+          const dictionary = [
+            ...customers.map(c => c.name),
+            ...customers.map(c => c.hindiName),
+            ...customers.flatMap(c => c.aliases || []),
+            ...rateCard.map(r => r.name),
+            ...rateCard.map(r => r.hindiName),
+            'Avinash', 'अविनाश', 'sev', 'सेव', 'seb', 'सेब', 'likh do', 'लिख दो', 'udhaar', 'उधार'
+          ];
+          transcript = await transcribeWithWisprFlow({
+            apiKey: effectiveWisprKey,
+            audioBlob,
+            language: currentLanguage,
+            customDictionary: dictionary
+          });
+          console.log('📝 Wispr Flow Transcription:', transcript);
+        } catch (wisprErr) {
+          console.warn('Wispr Flow STT failed, falling back to Groq Whisper:', wisprErr.message);
+        }
+      }
+
+      // Priority 2 / Fallback: Groq Whisper Large v3 Turbo
+      if (!transcript && effectiveGroqKey) {
+        transcript = await transcribeWithGroqWhisper(
+          effectiveGroqKey, 
+          audioBlob, 
+          currentLanguage
+        );
+        console.log('📝 Groq Whisper Transcription:', transcript);
+      }
 
       if (!transcript || transcript.trim().length === 0) {
         throw new Error('No intelligible speech detected. Please speak closer to the microphone.');
@@ -110,7 +141,7 @@ export default function App() {
 
       setCurrentTranscript(transcript);
 
-      // Step 2: AI Parsing via Groq AI
+      // Step 2: AI Parsing via Groq AI (with multi-model 70B -> 8B failover)
       await executeAIParser(transcript);
     } catch (err) {
       console.error('Audio processing error:', err);
@@ -183,6 +214,17 @@ export default function App() {
       parsedResult = parseKiranaVoiceLocally(transcriptText, customers, rateCard);
     }
 
+    // Verify / strengthen customer match using phonetic matching
+    const spokenCust = parsedResult.customer_spoken || parsedResult.matched_customer_name || '';
+    if (spokenCust) {
+      const phoneticMatch = matchCustomerPhonetically(spokenCust, customers, 0.65);
+      if (phoneticMatch.isMatch && phoneticMatch.customer) {
+        parsedResult.matched_customer_id = phoneticMatch.customer.id;
+        parsedResult.matched_customer_name = phoneticMatch.customer.name;
+        parsedResult.match_confidence = Math.max(parsedResult.match_confidence || 0, phoneticMatch.confidence);
+      }
+    }
+
     // Enrich items with Store Rate Card pricing if price was 0 or uncalculated
     if (parsedResult.items && parsedResult.items.length > 0) {
       let computedSum = 0;
@@ -196,10 +238,19 @@ export default function App() {
 
         let qtyNum = parseFloat(item.quantity);
         if (isNaN(qtyNum)) {
-          if (/दो|do|two|jo/i.test(item.quantity || '')) qtyNum = 2;
-          else if (/एक|ek|one/i.test(item.quantity || '')) qtyNum = 1;
-          else if (/आधा|aadha|half/i.test(item.quantity || '')) qtyNum = 0.5;
-          else if (/पाव|pav|pao/i.test(item.quantity || '')) qtyNum = 0.25;
+          const qStr = (item.quantity || '').toLowerCase();
+          if (/चार|char|chaar|four/i.test(qStr)) qtyNum = 4;
+          else if (/तीन|tin|teen|three/i.test(qStr)) qtyNum = 3;
+          else if (/दो|do|two|jo|पिलो/i.test(qStr)) qtyNum = 2;
+          else if (/एक|ek|one/i.test(qStr)) qtyNum = 1;
+          else if (/पाँच|पांच|panch|five/i.test(qStr)) qtyNum = 5;
+          else if (/छह|chhe|six/i.test(qStr)) qtyNum = 6;
+          else if (/साढ़े पाव/i.test(qStr)) qtyNum = 0.375;
+          else if (/सवा/i.test(qStr)) qtyNum = 1.25;
+          else if (/डेढ़|dedh/i.test(qStr)) qtyNum = 1.5;
+          else if (/ढाई|dhai/i.test(qStr)) qtyNum = 2.5;
+          else if (/आधा|aadha|half/i.test(qStr)) qtyNum = 0.5;
+          else if (/पाव|pav|pao/i.test(qStr)) qtyNum = 0.25;
           else qtyNum = 1;
         }
 

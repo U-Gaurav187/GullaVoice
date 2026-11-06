@@ -28,6 +28,7 @@ export default function SettingsModal({
 }) {
   const [formData, setFormData] = useState(settings);
   const [showGroqKey, setShowGroqKey] = useState(false);
+  const [showWisprKey, setShowWisprKey] = useState(false);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   const [testStatus, setTestStatus] = useState(null); // { type: 'success' | 'error', message: '' }
   const [isTesting, setIsTesting] = useState(false);
@@ -212,7 +213,7 @@ export default function SettingsModal({
             {/* Groq Key */}
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="font-bold text-stone-700 text-[11px]">Groq API Key:</label>
+                <label className="font-bold text-stone-700 text-[11px]">Groq API Key (Whisper & Llama):</label>
                 <a
                   href="https://console.groq.com/keys"
                   target="_blank"
@@ -236,6 +237,41 @@ export default function SettingsModal({
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600"
                 >
                   {showGroqKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Wispr Flow API Key (Scaler x Wispr Flow Hackathon) */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="font-bold text-stone-700 text-[11px] flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                  <span>Wispr Flow Voice API Key:</span>
+                  <span className="text-[10px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.2 rounded">Hackathon</span>
+                </label>
+                <a
+                  href="https://wisprflow.ai"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-purple-600 hover:underline inline-flex items-center gap-0.5 text-[11px] font-semibold"
+                >
+                  wisprflow.ai <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+              <div className="relative">
+                <input
+                  type={showWisprKey ? 'text' : 'password'}
+                  placeholder="wispr_..."
+                  value={formData.wisprFlowApiKey || ''}
+                  onChange={(e) => setFormData({ ...formData, wisprFlowApiKey: e.target.value })}
+                  className="w-full text-xs font-mono p-2.5 pr-10 rounded-xl border border-stone-300 bg-white focus:outline-none focus:border-purple-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowWisprKey(!showWisprKey)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600"
+                >
+                  {showWisprKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>

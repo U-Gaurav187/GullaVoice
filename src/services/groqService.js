@@ -41,7 +41,13 @@ OPERATIONAL KIRANA DISCOURSE BIFURCATION RULES (CRITICAL):
      * "dedh sau" = 150, "dhai sau" = 250, "sawa sau" = 125, "paune do sau" = 175
      * "aadha kilo" = 0.5 kg, "pav kilo" / "pao" = 0.25 kg, "paun kilo" = 0.75 kg, "dedh kilo" = 1.5 kg
    - ALWAYS map distorted or accented spoken customer names to the closest matching customer in the EXISTING CUSTOMERS directory!
-   - Match items against store rate card and compute calculated_price_inr.
+     * "अभिनाश केट" or "अभिनाश" or "अब आज के" -> Avinash (अविनाश)
+     * "प्रमेश" or "रमेश" -> Ramesh Bhai (रमेश भाई)
+     * "मुषाली" or "वैशाली" -> Vaishali (वैशाली)
+     * "पार्थ" -> Parth (पार्थ)
+   - Match items against store rate card and compute calculated_price_inr:
+     * "सेव" / "सेब" / "नमकीन" -> Sev (₹160/kg)
+   - If unit price or total amount is not explicitly stated in spoken command, compute total_amount_inr by multiplying quantity * rateCard.unitPrice!
 
 5. DUAL-LANGUAGE VOICE READBACK:
    - "tts_hindi_readback": Clear, natural Devanagari Hindi readback confirming the customer name, items, and total amount.
@@ -76,10 +82,9 @@ Respond strictly in valid JSON conforming to this schema:
 }`;
 
 const CANDIDATE_CHAT_MODELS = [
-  'openai/gpt-oss-120b',
-  'openai/gpt-oss-20b',
-  'qwen/qwen3.8-27b',
-  'llama-3.3-70b-versatile'
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
+  'gemma2-9b-it'
 ];
 
 /**
@@ -106,9 +111,9 @@ export async function transcribeWithGroqWhisper(apiKey, audioBlob, language = 'h
 
       // Bilingual prompt with Devanagari + Romanized to anchor Whisper's decoder in correct script & names
       formData.append('prompt',
-        'किराना खाता रोजनामचा। ग्राहक नाम: रमेश भाई, वैशाली, पार्थ, सुनीता भाभी, शर्मा जी, पिंटू, महेश टेलर। ' +
-        'सामान: आलू, कांदा, प्याज, टमाटर, धनिया, हरी मिर्च, केला चिप्स, तिल का तेल, चीनी, तेल, दूध, चावल, आटा, दाल। ' +
-        'मात्रा: दो किलो, तीन किलो, पाव किलो, आधा किलो, एक पैकेट। ' +
+        'किराना खाता रोजनामचा। ग्राहक नाम: अविनाश, रमेश भाई, वैशाली, पार्थ, सुनीता भाभी, शर्मा जी, पिंटू, महेश टेलर। ' +
+        'सामान: सेव, सेब, नमकीन, आलू, कांदा, प्याज, टमाटर, धनिया, हरी मिर्च, केला चिप्स, तिल का तेल, चीनी, तेल, दूध, चावल, आटा, दाल। ' +
+        'मात्रा: चार किलो, दो किलो, तीन किलो, पाव किलो, आधा किलो, एक पैकेट। ' +
         'आदेश: खाते में लिख दो, उधार लिखो, जमा करो।'
       );
 
@@ -176,6 +181,7 @@ RAW SPOKEN TRANSCRIPT FROM MICROPHONE:
 
   for (const model of CANDIDATE_CHAT_MODELS) {
     try {
+      console.log(`⚡ Trying Groq chat model: ${model}...`);
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -197,13 +203,17 @@ RAW SPOKEN TRANSCRIPT FROM MICROPHONE:
         const data = await response.json();
         const rawContent = data.choices?.[0]?.message?.content;
         if (rawContent) {
+          console.log(`✅ Groq model ${model} responded successfully!`);
           return JSON.parse(rawContent);
         }
       } else {
         const errData = await response.json().catch(() => ({}));
-        lastError = new Error(errData.error?.message || `Groq Error ${response.status}`);
+        const errMsg = errData.error?.message || `Groq Error ${response.status}`;
+        console.warn(`⚠️ Groq model ${model} returned error (${response.status}): ${errMsg}. Attempting failover model...`);
+        lastError = new Error(errMsg);
       }
     } catch (e) {
+      console.warn(`⚠️ Groq model ${model} network error: ${e.message}. Attempting failover...`);
       lastError = e;
     }
   }
