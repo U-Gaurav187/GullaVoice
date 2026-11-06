@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { 
   UserCheck, 
-  Phone, 
   ArrowUpRight, 
   ArrowDownLeft, 
   Share2, 
@@ -90,18 +89,13 @@ export default function CustomerKhataTable({
                   className="hover:bg-amber-50/60 transition-colors cursor-pointer group"
                   title="ग्राहक का पूरा बहीखाता देखने के लिए क्लिक करें"
                 >
-                  {/* Name and Contact */}
+                  {/* Name */}
                   <td className="py-3.5 px-4">
                     <div className="font-bold text-stone-900 text-sm flex items-center gap-2">
                       <span>{customer.name}</span>
                       <span className="text-[11px] font-devanagari text-stone-500">
                         ({customer.hindiName || customer.name})
                       </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-[10px] text-stone-400 font-mono mt-0.5">
-                      <span>{customer.id}</span>
-                      <span>•</span>
-                      <span>{customer.phone}</span>
                     </div>
                   </td>
 

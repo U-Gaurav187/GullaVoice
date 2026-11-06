@@ -607,6 +607,7 @@ export default function App() {
       <PurchaseDetailModal
         transaction={selectedTransaction}
         customer={selectedCustomer}
+        transactions={transactions}
         onClose={() => {
           setSelectedTransaction(null);
           setSelectedCustomer(null);
