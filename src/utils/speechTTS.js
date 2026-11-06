@@ -1,6 +1,6 @@
 /**
- * Native Browser Speech Synthesis (TTS) Manager for Hindi (hi-IN)
- * Speeds up or adapts voice for dukandaar acoustic clarity.
+ * Browser Speech Synthesis Manager
+ * Supports natural voice readback in either Hindi ('hi-IN') or Indian English ('en-IN').
  */
 
 class SpeechTTSManager {
@@ -24,20 +24,26 @@ class SpeechTTSManager {
     this.voices = this.synth.getVoices();
   }
 
-  getHindiVoice() {
+  getVoiceForLanguage(lang = 'hi') {
     if (!this.voices || !this.voices.length) {
       this.loadVoices();
     }
 
-    // 1. Look for native Hindi (hi-IN or hi)
-    const hiVoice = this.voices.find(v => v.lang === 'hi-IN' || v.lang.startsWith('hi'));
-    if (hiVoice) return hiVoice;
+    if (lang === 'hi') {
+      // Look for Hindi voice
+      const hiVoice = this.voices.find(v => v.lang === 'hi-IN' || v.lang.startsWith('hi'));
+      if (hiVoice) return hiVoice;
+      // Fallback to Indian English
+      const enInVoice = this.voices.find(v => v.lang === 'en-IN' || v.lang.includes('IN'));
+      if (enInVoice) return enInVoice;
+    } else {
+      // Look for Indian English first, then general English
+      const enInVoice = this.voices.find(v => v.lang === 'en-IN' || v.lang.includes('IN'));
+      if (enInVoice) return enInVoice;
+      const enVoice = this.voices.find(v => v.lang.startsWith('en'));
+      if (enVoice) return enVoice;
+    }
 
-    // 2. Look for Indian English (en-IN)
-    const enInVoice = this.voices.find(v => v.lang === 'en-IN' || v.lang.includes('IN'));
-    if (enInVoice) return enInVoice;
-
-    // 3. Fallback to default voice
     return this.voices.find(v => v.default) || this.voices[0] || null;
   }
 
@@ -52,14 +58,13 @@ class SpeechTTSManager {
     if (this.onStateChange) this.onStateChange(false);
   }
 
-  speak(text, onComplete) {
+  speak(text, lang = 'hi', onComplete) {
     if (!this.synth) {
       console.warn('SpeechSynthesis is not supported in this browser.');
       if (onComplete) onComplete();
       return;
     }
 
-    // Cancel any ongoing speech
     this.stop();
 
     if (!text || !text.trim()) {
@@ -68,17 +73,16 @@ class SpeechTTSManager {
     }
 
     const utterance = new SpeechSynthesisUtterance(text.trim());
-    const voice = this.getHindiVoice();
+    const voice = this.getVoiceForLanguage(lang);
 
     if (voice) {
       utterance.voice = voice;
-      utterance.lang = voice.lang || 'hi-IN';
+      utterance.lang = voice.lang || (lang === 'hi' ? 'hi-IN' : 'en-IN');
     } else {
-      utterance.lang = 'hi-IN';
+      utterance.lang = lang === 'hi' ? 'hi-IN' : 'en-IN';
     }
 
-    // Optimal rate and pitch for Indian Kirana shop counters
-    utterance.rate = 0.95; // Slightly measured pace for noisy environment
+    utterance.rate = 0.95; // Clear articulation
     utterance.pitch = 1.0;
 
     utterance.onstart = () => {

@@ -1,266 +1,285 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Volume2, Sparkles, Filter, AlertCircle, RefreshCw, Send } from 'lucide-react';
+import { 
+  Mic, 
+  Square, 
+  Volume2, 
+  Sparkles, 
+  Filter, 
+  AlertCircle, 
+  RefreshCw, 
+  Clock, 
+  Languages, 
+  SlidersHorizontal,
+  ChevronDown,
+  ChevronUp
+} from 'lucide-react';
+import { audioRecorder } from '../utils/audioRecorder.js';
+import { NOISY_GALLA_PRESETS } from '../data/noisyGallaPresets.js';
 
 export default function GallaVoiceController({
-  onTranscriptReady,
+  onAudioRecorded,
+  onManualTextSubmit,
   isProcessing,
   currentTranscript,
   filteredNoise,
-  onReset
+  language = 'hi',
+  hasApiKey = false,
+  onOpenSettings
 }) {
-  const [isListening, setIsListening] = useState(false);
-  const [manualText, setManualText] = useState('');
-  const [speechSupported, setSpeechSupported] = useState(true);
-  const [errorMessage, setErrorMessage] = useState('');
-  const recognitionRef = useRef(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [micVolume, setMicVolume] = useState(0);
+  const [recordDuration, setRecordDuration] = useState(0);
+  const [statusMessage, setStatusMessage] = useState('');
+  const [showSimulateDrawer, setShowSimulateDrawer] = useState(false);
+  const [manualInput, setManualInput] = useState('');
+  const timerRef = useRef(null);
 
+  // Timer while recording
   useEffect(() => {
-    // Check Web Speech API support
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setSpeechSupported(false);
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.lang = 'hi-IN'; // Set to Hindi / Hinglish
-
-    recognition.onstart = () => {
-      setIsListening(true);
-      setErrorMessage('');
-    };
-
-    recognition.onresult = (event) => {
-      let interim = '';
-      let final = '';
-
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          final += event.results[i][0].transcript;
-        } else {
-          interim += event.results[i][0].transcript;
-        }
-      }
-
-      const text = (final || interim).trim();
-      if (text) {
-        setManualText(text);
-      }
-    };
-
-    recognition.onerror = (event) => {
-      console.warn('Speech recognition error:', event.error);
-      setIsListening(false);
-      if (event.error === 'not-allowed') {
-        setErrorMessage('Microphone access denied. Please allow mic permission in your browser.');
-      } else if (event.error !== 'no-speech') {
-        setErrorMessage(`Mic error: ${event.error}`);
-      }
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-      // Auto-submit if text was captured
-      if (manualText && manualText.trim().length > 3) {
-        onTranscriptReady(manualText.trim());
-      }
-    };
-
-    recognitionRef.current = recognition;
-
-    return () => {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.abort();
-        } catch (e) {}
-      }
-    };
-  }, [manualText, onTranscriptReady]);
-
-  // Sync manual input when preset is loaded
-  useEffect(() => {
-    if (currentTranscript) {
-      setManualText(currentTranscript);
-    }
-  }, [currentTranscript]);
-
-  const toggleListening = () => {
-    if (isListening) {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-      setIsListening(false);
+    if (isRecording) {
+      setRecordDuration(0);
+      timerRef.current = setInterval(() => {
+        setRecordDuration(prev => prev + 1);
+      }, 1000);
     } else {
-      setErrorMessage('');
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.start();
-        } catch (err) {
-          console.warn('Start error:', err);
-          recognitionRef.current.abort();
-          setTimeout(() => recognitionRef.current?.start(), 150);
-        }
-      }
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isRecording]);
+
+  const formatTimer = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
+
+  const handleStartRecording = async () => {
+    setStatusMessage('');
+    try {
+      await audioRecorder.start((volume) => {
+        setMicVolume(volume);
+      });
+      setIsRecording(true);
+      setStatusMessage(language === 'hi' ? 'दुकान की सामान्य भाषा में बोलें...' : 'Speak your ledger command...');
+    } catch (err) {
+      console.error('Mic start error:', err);
+      setStatusMessage(err.message || 'Microphone access failed.');
     }
   };
 
-  const handleManualSubmit = (e) => {
-    e.preventDefault();
-    if (!manualText.trim() || isProcessing) return;
-    onTranscriptReady(manualText.trim());
+  const handleStopRecording = async () => {
+    if (!isRecording) return;
+    setIsRecording(false);
+    setStatusMessage(language === 'hi' ? 'AI आवाज़ को ट्रांसक्राइब कर रहा है...' : 'Transcribing voice via AI...');
+    try {
+      const audioBlob = await audioRecorder.stop();
+      if (audioBlob && audioBlob.size > 1000) {
+        onAudioRecorded(audioBlob);
+      } else {
+        setStatusMessage(language === 'hi' ? 'कोई आवाज़ सुनाई नहीं दी। फिर से बोलें।' : 'No speech detected. Please speak louder.');
+      }
+    } catch (err) {
+      console.error('Stop error:', err);
+      setStatusMessage(err.message || 'Failed to capture audio.');
+    }
+  };
+
+  const toggleRecording = () => {
+    if (isRecording) {
+      handleStopRecording();
+    } else {
+      handleStartRecording();
+    }
   };
 
   return (
-    <div className="bg-white rounded-3xl p-6 border border-stone-200/80 shadow-sm relative overflow-hidden">
-      {/* Top Banner */}
-      <div className="flex items-center justify-between mb-4">
+    <div className="bg-white rounded-3xl p-6 sm:p-8 border border-stone-200/90 shadow-sm flex flex-col items-center text-center relative overflow-hidden">
+      {/* Recording Status Header */}
+      <div className="w-full flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-orange-100 text-orange-600 flex items-center justify-center font-bold">
-            1
-          </div>
-          <div>
-            <h2 className="text-base font-bold text-stone-900">
-              गल्ला वॉयस माइक (Galla Mic Controller)
-            </h2>
-            <p className="text-xs text-stone-500">
-              Accented Hindi/Hinglish speech with live counter noise cancellation
-            </p>
-          </div>
+          <span className="w-2.5 h-2.5 rounded-full bg-orange-500 animate-pulse"></span>
+          <span className="text-xs font-bold text-stone-700 tracking-wide">
+            {language === 'hi' ? 'गल्ला वॉयस माइक' : 'Galla Voice Counter'}
+          </span>
         </div>
 
-        {/* Live Status Pill */}
-        <div className="flex items-center gap-2">
-          {isListening && (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 animate-pulse">
-              <span className="w-2 h-2 rounded-full bg-red-600"></span>
-              लाइव सुन रहे हैं (Listening...)
-            </span>
-          )}
-          {isProcessing && (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              प्रोसेसिंग (Processing...)
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Center Giant Microphone Action */}
-      <div className="flex flex-col items-center justify-center my-6">
-        <div className="relative flex items-center justify-center">
-          {/* Pulsing ring during recording */}
-          {isListening && (
-            <div className="absolute w-36 h-36 rounded-full bg-orange-500/20 animate-ping"></div>
-          )}
-
-          <button
-            onClick={toggleListening}
-            disabled={isProcessing}
-            className={`relative z-10 w-28 h-28 rounded-full flex flex-col items-center justify-center text-white shadow-xl transition-all duration-200 transform active:scale-95 ${
-              isListening
-                ? 'bg-gradient-to-tr from-red-600 to-rose-500 shadow-red-500/40 ring-4 ring-red-300'
-                : 'bg-gradient-to-tr from-orange-500 via-amber-600 to-orange-600 hover:shadow-orange-500/30 ring-4 ring-orange-100 hover:ring-orange-200'
-            }`}
-            title={isListening ? 'माइक बंद करने के लिए टैप करें' : 'बोलने के लिए टैप करें (Tap to Speak)'}
-          >
-            {isListening ? (
-              <>
-                <MicOff className="w-10 h-10 animate-bounce" />
-                <span className="text-[11px] font-bold mt-1">रोकें (STOP)</span>
-              </>
-            ) : (
-              <>
-                <Mic className="w-10 h-10" />
-                <span className="text-[11px] font-bold mt-1">बोलें (SPEAK)</span>
-              </>
-            )}
-          </button>
-        </div>
-
-        {/* Live Audio Waveform Simulation */}
-        {isListening ? (
-          <div className="flex items-center justify-center gap-1 mt-4 h-10">
-            {[14, 28, 42, 20, 36, 12, 38, 24, 40, 16, 32].map((height, i) => (
-              <span
-                key={i}
-                className="w-1 bg-orange-500 rounded-full waveform-bar"
-                style={{
-                  height: `${height}px`,
-                  animationDelay: `${i * 0.1}s`
-                }}
-              ></span>
-            ))}
+        {/* Live Timer Pill */}
+        {isRecording ? (
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-100 text-red-700 text-xs font-mono font-bold animate-pulse border border-red-300">
+            <span className="w-2 h-2 rounded-full bg-red-600"></span>
+            <span>{formatTimer(recordDuration)}</span>
           </div>
         ) : (
-          <p className="text-xs text-stone-500 font-medium mt-3 text-center">
-            {speechSupported
-              ? 'बटन दबाकर दुकान की सामान्य भाषा में बोलें (जैसे: "रमेश भाई को 2 किलो चीनी उधार लिख दो")'
-              : 'ब्राउज़र में माइक समर्थित नहीं है, नीचे टेक्स्ट लिखकर टेस्ट करें।'}
+          <div className="text-[11px] font-semibold text-stone-400">
+            {language === 'hi' ? 'टैप करके शुरू या बंद करें' : 'Tap to start or stop'}
+          </div>
+        )}
+      </div>
+
+      {/* API Key Warning Alert if missing */}
+      {!hasApiKey && (
+        <div 
+          onClick={onOpenSettings}
+          className="w-full mb-4 p-3 rounded-2xl bg-amber-50 hover:bg-amber-100/80 border border-amber-300 text-amber-900 text-xs font-medium cursor-pointer transition-colors flex items-center justify-between"
+        >
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>मुफ़्त Groq API Key जोड़ें (Whisper AI + Llama 3.3 के लिए)</span>
+          </div>
+          <span className="text-[11px] font-bold underline text-orange-700">Set Key →</span>
+        </div>
+      )}
+
+      {/* THE CENTRAL GIANT MINIMALIST MIC BUTTON */}
+      <div className="relative my-6 flex flex-col items-center justify-center">
+        {/* Pulsing ring during recording reactive to mic volume */}
+        {isRecording && (
+          <div 
+            className="absolute rounded-full bg-red-500/20 transition-all duration-75 ease-out"
+            style={{
+              width: `${140 + micVolume * 1.5}px`,
+              height: `${140 + micVolume * 1.5}px`
+            }}
+          ></div>
+        )}
+
+        <button
+          onClick={toggleRecording}
+          disabled={isProcessing}
+          className={`relative z-10 w-32 h-32 rounded-full flex flex-col items-center justify-center text-white shadow-2xl transition-all duration-200 active:scale-95 cursor-pointer ${
+            isRecording
+              ? 'bg-gradient-to-tr from-red-600 to-rose-500 shadow-red-500/40 ring-8 ring-red-100'
+              : 'bg-gradient-to-tr from-orange-500 via-amber-600 to-orange-600 hover:shadow-orange-500/40 ring-8 ring-orange-100 hover:ring-orange-200'
+          }`}
+        >
+          {isRecording ? (
+            <>
+              <Square className="w-10 h-10 fill-white" />
+              <span className="text-xs font-black tracking-wider mt-1.5 uppercase">
+                {language === 'hi' ? 'रोकें (STOP)' : 'FINISH'}
+              </span>
+            </>
+          ) : isProcessing ? (
+            <>
+              <RefreshCw className="w-10 h-10 animate-spin" />
+              <span className="text-[11px] font-bold mt-1.5">
+                {language === 'hi' ? 'प्रोसेसिंग...' : 'AI Thinking...'}
+              </span>
+            </>
+          ) : (
+            <>
+              <Mic className="w-12 h-12" />
+              <span className="text-xs font-black tracking-wider mt-1.5 uppercase">
+                {language === 'hi' ? 'बोलें (TAP)' : 'SPEAK'}
+              </span>
+            </>
+          )}
+        </button>
+
+        {/* Dynamic Soundwave Visualizer while recording */}
+        {isRecording ? (
+          <div className="flex items-center justify-center gap-1.5 mt-5 h-8">
+            {[20, 45, 80, 60, 95, 40, 75, 30, 90, 50, 25].map((factor, i) => {
+              const h = Math.max(6, Math.min(36, Math.round((micVolume / 100) * factor)));
+              return (
+                <span
+                  key={i}
+                  className="w-1.5 bg-red-500 rounded-full transition-all duration-75"
+                  style={{ height: `${h}px` }}
+                ></span>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-xs text-stone-500 font-medium mt-4 max-w-xs">
+            {language === 'hi' 
+              ? 'माइक दबाकर बोलें, जैसे: "रमेश भाई को दो किलो चीनी और एक पैकेट तेल उधार लिख दो"'
+              : 'Tap mic and speak, e.g. "Write 2kg sugar and 1 oil packet on credit for Ramesh bhai"'}
           </p>
         )}
       </div>
 
-      {/* Error alert */}
-      {errorMessage && (
-        <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 shrink-0" />
-          <span>{errorMessage}</span>
+      {/* Status banner */}
+      {statusMessage && (
+        <div className="text-xs font-semibold text-stone-600 mb-3 animate-fade-in">
+          {statusMessage}
         </div>
       )}
 
-      {/* Raw Transcript Box & Manual Text Entry */}
-      <form onSubmit={handleManualSubmit} className="space-y-3">
-        <div>
-          <label className="block text-xs font-bold text-stone-700 mb-1 flex items-center justify-between">
-            <span>कहा गया वाक्य (Spoken Transcript):</span>
-            <span className="text-[10px] text-stone-400 font-normal">
-              Type or speak any Hinglish sentence
+      {/* RECOGNIZED TRANSCRIPT & NOISE BADGE */}
+      {currentTranscript && (
+        <div className="w-full mt-4 p-4 rounded-2xl bg-stone-50 border border-stone-200 text-left space-y-2">
+          <div className="text-[11px] font-bold text-stone-500 uppercase tracking-wider flex items-center justify-between">
+            <span>{language === 'hi' ? 'सुनाई दिया (What was heard):' : 'Spoken Input:'}</span>
+            <span className="text-emerald-700 font-semibold text-[10px] bg-emerald-100 px-2 py-0.5 rounded-full">
+              Whisper AI
             </span>
-          </label>
-          <div className="relative">
-            <textarea
-              rows={2}
-              value={manualText}
-              onChange={(e) => setManualText(e.target.value)}
-              placeholder="जैसे: Ramesh bhai ko... wo do rupee ki he dudh 40 ka ho gaya... 2 kilo cheeni aur 1 tel udhaar likh do"
-              className="w-full text-xs font-medium p-3 pr-10 rounded-xl bg-stone-50 border border-stone-300 focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-200 transition-all resize-none text-stone-800 placeholder-stone-400"
-            />
-            {manualText && (
-              <button
-                type="submit"
-                disabled={isProcessing}
-                className="absolute right-2.5 bottom-3.5 p-1.5 rounded-lg bg-orange-600 text-white hover:bg-orange-700 transition-colors shadow-xs"
-                title="पार्स करें (Process Speech)"
-              >
-                <Send className="w-4 h-4" />
-              </button>
-            )}
           </div>
-        </div>
 
-        {/* Removed Side-Chatter Display Badge (Requirement 1) */}
-        {filteredNoise && (
-          <div className="p-3 rounded-xl bg-stone-100 border border-stone-200 text-xs">
-            <div className="flex items-center gap-1.5 text-stone-600 font-semibold mb-1">
-              <Filter className="w-3.5 h-3.5 text-orange-600" />
-              <span>निकाली गई काउंटर बातचीत (Filtered Side-Chatter):</span>
+          <p className="text-sm font-semibold text-stone-900 bg-white p-3 rounded-xl border border-stone-200/80 leading-relaxed font-devanagari">
+            "{currentTranscript}"
+          </p>
+
+          {/* Strikethrough Removed Noise */}
+          {filteredNoise && (
+            <div className="pt-2 border-t border-stone-200/60">
+              <span className="text-[11px] font-semibold text-stone-500 flex items-center gap-1 mb-1">
+                <Filter className="w-3 h-3 text-orange-600" />
+                <span>{language === 'hi' ? 'हटाया गया शोर (Filtered Disturbance):' : 'Removed Chatter:'}</span>
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {filteredNoise.split('|').map((chunk, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-block px-2 py-0.5 rounded bg-stone-200 text-stone-500 line-through text-[11px] font-mono"
+                  >
+                    {chunk.trim()}
+                  </span>
+                ))}
+              </div>
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              {filteredNoise.split('|').map((segment, idx) => (
-                <span
-                  key={idx}
-                  className="inline-block px-2 py-0.5 rounded bg-stone-200/80 text-stone-500 line-through font-mono text-[11px]"
-                  title="This interruption was automatically filtered out"
-                >
-                  {segment.trim()}
-                </span>
-              ))}
-            </div>
+          )}
+        </div>
+      )}
+
+      {/* Collapsible Clean Test Simulator Drawer */}
+      <div className="w-full mt-6 pt-4 border-t border-stone-200 text-left">
+        <button
+          onClick={() => setShowSimulateDrawer(!showSimulateDrawer)}
+          className="text-xs font-bold text-stone-600 hover:text-stone-900 flex items-center justify-between w-full p-2 rounded-xl hover:bg-stone-100 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <SlidersHorizontal className="w-3.5 h-3.5 text-orange-600" />
+            <span>
+              {language === 'hi' ? 'शोरगुल ऑडियो टेस्ट उदाहरण (Test Examples)' : 'Simulate Noisy Audio (Test Inputs)'}
+            </span>
+          </div>
+          {showSimulateDrawer ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        </button>
+
+        {showSimulateDrawer && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3 animate-in fade-in duration-150">
+            {NOISY_GALLA_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                onClick={() => onManualTextSubmit(preset.spokenText)}
+                disabled={isProcessing}
+                className="text-left p-2.5 rounded-xl bg-stone-50 hover:bg-orange-50/70 border border-stone-200 hover:border-orange-300 transition-all text-xs group"
+              >
+                <div className="font-bold text-stone-800 group-hover:text-orange-900 flex items-center justify-between">
+                  <span>{preset.title}</span>
+                  <span className="text-[10px] text-orange-600 font-bold">Run →</span>
+                </div>
+                <p className="text-[11px] text-stone-500 font-mono italic truncate mt-1">
+                  "{preset.spokenText}"
+                </p>
+              </button>
+            ))}
           </div>
         )}
-      </form>
+      </div>
     </div>
   );
 }

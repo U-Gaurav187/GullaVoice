@@ -12,27 +12,28 @@ import {
   AlertCircle
 } from 'lucide-react';
 
-import Header from './components/Header';
-import AudioPresetBar from './components/AudioPresetBar';
-import GallaVoiceController from './components/GallaVoiceController';
-import StagingCard from './components/StagingCard';
-import TransactionsTable from './components/TransactionsTable';
-import CustomerKhataTable from './components/CustomerKhataTable';
-import RateCardModal from './components/RateCardModal';
-import SettingsModal from './components/SettingsModal';
+import Header from './components/Header.jsx';
+import GallaVoiceController from './components/GallaVoiceController.jsx';
+import StagingCard from './components/StagingCard.jsx';
+import TransactionsTable from './components/TransactionsTable.jsx';
+import CustomerKhataTable from './components/CustomerKhataTable.jsx';
+import RateCardModal from './components/RateCardModal.jsx';
+import SettingsModal from './components/SettingsModal.jsx';
+import LanguageSelectModal from './components/LanguageSelectModal.jsx';
 
-import { storage } from './utils/storage';
-import { speechTTS } from './utils/speechTTS';
-import { processGallaSpeech } from './services/parserEngine';
+import { storage } from './utils/storage.js';
+import { speechTTS } from './utils/speechTTS.js';
+import { transcribeWithGroqWhisper, parseWithGroqLlama } from './services/groqService.js';
+import { parseKiranaVoiceLocally } from './services/localParser.js';
 
 export default function App() {
-  // Core persistent states
+  // Persistent database states
   const [transactions, setTransactions] = useState(() => storage.getTransactions());
   const [customers, setCustomers] = useState(() => storage.getCustomers());
   const [rateCard, setRateCard] = useState(() => storage.getRateCard());
   const [settings, setSettings] = useState(() => storage.getSettings());
 
-  // Active interaction states
+  // Active voice & draft states
   const [currentTranscript, setCurrentTranscript] = useState('');
   const [filteredNoise, setFilteredNoise] = useState('');
   const [stagedDraft, setStagedDraft] = useState(null);
@@ -44,91 +45,145 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('TRANSACTIONS'); // 'TRANSACTIONS' | 'CUSTOMERS'
   const [isRateCardOpen, setIsRateCardOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isLanguageModalOpen, setIsLanguageModalOpen] = useState(false);
 
-  // Sync TTS state listener
+  // First-time startup modal check
+  useEffect(() => {
+    const hasChosenLang = localStorage.getItem('gallavoice_welcome_seen_v1');
+    if (!hasChosenLang) {
+      setIsLanguageModalOpen(true);
+    }
+  }, []);
+
+  // Sync TTS speech state
   useEffect(() => {
     speechTTS.onStateChange = (speaking) => {
       setIsTtsSpeaking(speaking);
     };
   }, []);
 
-  // Save to localStorage whenever state updates
-  useEffect(() => {
-    storage.saveTransactions(transactions);
-  }, [transactions]);
+  // Persistence triggers
+  useEffect(() => { storage.saveTransactions(transactions); }, [transactions]);
+  useEffect(() => { storage.saveCustomers(customers); }, [customers]);
+  useEffect(() => { storage.saveRateCard(rateCard); }, [rateCard]);
+  useEffect(() => { storage.saveSettings(settings); }, [settings]);
 
-  useEffect(() => {
-    storage.saveCustomers(customers);
-  }, [customers]);
-
-  useEffect(() => {
-    storage.saveRateCard(rateCard);
-  }, [rateCard]);
-
-  useEffect(() => {
-    storage.saveSettings(settings);
-  }, [settings]);
+  const currentLanguage = settings.speechLanguage === 'en' ? 'en' : 'hi';
+  const effectiveGroqKey = settings.groqApiKey || import.meta.env.VITE_GROQ_API_KEY || '';
 
   // Aggregate stats
   const totalUdhaar = customers.reduce((sum, c) => sum + (c.totalUdhaar || 0), 0);
   const totalJama = customers.reduce((sum, c) => sum + (c.totalJama || 0), 0);
 
   /**
-   * Handle incoming speech transcript (from live Mic or 1-click Preset)
+   * 1. Voice-to-Text via Groq Whisper AI, followed by Llama 3.3 70B extraction
    */
-  const handleProcessTranscript = async (transcriptText) => {
-    if (!transcriptText || !transcriptText.trim()) return;
+  const handleAudioRecorded = async (audioBlob) => {
+    if (!effectiveGroqKey) {
+      setIsLanguageModalOpen(true);
+      return;
+    }
 
     setIsProcessing(true);
-    setCurrentTranscript(transcriptText);
+    speechTTS.stop();
 
     try {
-      const parsedResult = await processGallaSpeech({
-        transcript: transcriptText,
-        settings,
-        customers,
-        rateCard
-      });
+      // Step 1: AI Speech-to-Text via Whisper Large v3 Turbo
+      const transcript = await transcribeWithGroqWhisper(
+        effectiveGroqKey, 
+        audioBlob, 
+        currentLanguage
+      );
 
-      setFilteredNoise(parsedResult.ignored_side_chatter || '');
-      setStagedDraft(parsedResult);
-
-      // Auto-trigger Mandatory Native Hindi Voice Readback (TTS)
-      if (settings.autoReadback && parsedResult.tts_hindi_readback) {
-        // Small delay so UI renders staging card first
-        setTimeout(() => {
-          speechTTS.speak(parsedResult.tts_hindi_readback);
-        }, 300);
+      if (!transcript || transcript.trim().length === 0) {
+        throw new Error('No intelligible speech detected. Please speak closer to the microphone.');
       }
+
+      setCurrentTranscript(transcript);
+
+      // Step 2: AI Parsing via Llama 3.3 70B
+      await executeAIParser(transcript);
     } catch (err) {
-      console.error('Processing error:', err);
-      alert('Error parsing speech: ' + err.message);
+      console.error('Audio processing error:', err);
+      alert(err.message || 'Error processing audio via AI');
     } finally {
       setIsProcessing(false);
     }
   };
 
   /**
-   * 1-Click Preset selection from Audio Preset Bar
+   * Direct text processing (from preset or manual input)
    */
-  const handleSelectPreset = (preset) => {
-    // Stop ongoing speech
+  const handleProcessTranscript = async (text) => {
+    if (!text || !text.trim()) return;
+    setIsProcessing(true);
     speechTTS.stop();
-    handleProcessTranscript(preset.spokenText);
-  };
+    setCurrentTranscript(text);
 
-  /**
-   * Replay Hindi TTS readback
-   */
-  const handleReplayAudio = () => {
-    if (stagedDraft && stagedDraft.tts_hindi_readback) {
-      speechTTS.speak(stagedDraft.tts_hindi_readback);
+    try {
+      await executeAIParser(text);
+    } catch (err) {
+      console.error('Transcript parse error:', err);
+      alert(err.message || 'Error parsing transcript');
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   /**
-   * ❌ RETRY ACTION (The Confirmation Gate)
-   * Stops TTS audio immediately, discards draft, and resets view
+   * Executes AI LLM parser (or fallback if key missing)
+   */
+  const executeAIParser = async (transcriptText) => {
+    let parsedResult;
+
+    if (effectiveGroqKey) {
+      try {
+        parsedResult = await parseWithGroqLlama({
+          apiKey: effectiveGroqKey,
+          transcript: transcriptText,
+          customers,
+          rateCard,
+          language: currentLanguage
+        });
+      } catch (err) {
+        console.warn('Groq Llama failed, falling back to local engine:', err);
+        parsedResult = parseKiranaVoiceLocally(transcriptText, customers, rateCard);
+      }
+    } else {
+      parsedResult = parseKiranaVoiceLocally(transcriptText, customers, rateCard);
+    }
+
+    setFilteredNoise(parsedResult.ignored_side_chatter || '');
+    setStagedDraft(parsedResult);
+
+    // Step 3: Read back aloud in chosen language (Hindi or English)
+    const readbackSentence = currentLanguage === 'hi'
+      ? (parsedResult.tts_hindi_readback || parsedResult.tts_readback)
+      : (parsedResult.tts_readback || parsedResult.tts_hindi_readback);
+
+    if (settings.autoReadback && readbackSentence) {
+      setTimeout(() => {
+        speechTTS.speak(readbackSentence, currentLanguage);
+      }, 250);
+    }
+  };
+
+  /**
+   * Replay audio in chosen language
+   */
+  const handleReplayAudio = () => {
+    if (!stagedDraft) return;
+    const textToSpeak = currentLanguage === 'hi'
+      ? (stagedDraft.tts_hindi_readback || stagedDraft.tts_readback)
+      : (stagedDraft.tts_readback || stagedDraft.tts_hindi_readback);
+
+    if (textToSpeak) {
+      speechTTS.speak(textToSpeak, currentLanguage);
+    }
+  };
+
+  /**
+   * ❌ RETRY Action: Discards draft, stops speech
    */
   const handleRetry = () => {
     speechTTS.stop();
@@ -138,8 +193,7 @@ export default function App() {
   };
 
   /**
-   * ✅ CONTINUE ACTION (The Confirmation Gate)
-   * Commits draft to persistent ledger, updates customer balance, speaks confirmation
+   * ✅ CONTINUE Action: Commits to persistent local ledger
    */
   const handleContinue = () => {
     if (!stagedDraft) return;
@@ -149,7 +203,6 @@ export default function App() {
     const txnId = `TXN_${Date.now()}`;
     const nowIso = new Date().toISOString();
 
-    // 1. Resolve or Create Customer in persistent database
     let targetCustomerId = stagedDraft.matched_customer_id;
     let customerName = stagedDraft.matched_customer_name || stagedDraft.customer_spoken || 'Walk-in Customer';
 
@@ -164,7 +217,6 @@ export default function App() {
     const isUdhaar = stagedDraft.transaction_type === 'UDHAAR';
 
     if (customerIndex >= 0) {
-      // Update existing customer record
       const existing = updatedCustomers[customerIndex];
       const newUdhaar = isUdhaar ? existing.totalUdhaar + amount : existing.totalUdhaar;
       const newJama = !isUdhaar ? existing.totalJama + amount : existing.totalJama;
@@ -180,7 +232,6 @@ export default function App() {
       targetCustomerId = existing.id;
       customerName = existing.name;
     } else {
-      // Create new customer record
       const newCustId = `CUST_${String(updatedCustomers.length + 1).padStart(2, '0')}`;
       const newCustomer = {
         id: newCustId,
@@ -192,13 +243,12 @@ export default function App() {
         totalJama: !isUdhaar ? amount : 0,
         netBalance: isUdhaar ? amount : -amount,
         lastUpdated: nowIso,
-        notes: 'Created via GallaVoice counter'
+        notes: 'Created via GallaVoice'
       };
       updatedCustomers.push(newCustomer);
       targetCustomerId = newCustId;
     }
 
-    // 2. Build verified Transaction record
     const newTransaction = {
       id: txnId,
       timestamp: nowIso,
@@ -217,78 +267,66 @@ export default function App() {
       ignoredNoise: stagedDraft.ignored_side_chatter || '',
       rawTranscript: currentTranscript,
       status: 'COMMITTED',
-      ttsHindiText: stagedDraft.tts_hindi_readback
+      ttsHindiText: stagedDraft.tts_readback || stagedDraft.tts_hindi_readback
     };
 
-    // 3. Persist State
     setCustomers(updatedCustomers);
     setTransactions([newTransaction, ...transactions]);
     setNewestTxnId(txnId);
 
-    // 4. Confetti celebration
+    // Confetti celebration
     try {
-      confetti({
-        particleCount: 60,
-        spread: 70,
-        origin: { y: 0.7 }
-      });
+      confetti({ particleCount: 65, spread: 70, origin: { y: 0.75 } });
     } catch (e) {}
 
-    // 5. Short 1-second native Hindi audio confirmation
+    // Short audio confirmation in chosen language
     setTimeout(() => {
-      speechTTS.speak('खाता अपडेट हो गया।');
+      speechTTS.speak(
+        currentLanguage === 'hi' ? 'खाता अपडेट हो गया।' : 'Ledger updated successfully.',
+        currentLanguage
+      );
     }, 150);
 
-    // 6. Reset staged card
     setStagedDraft(null);
     setCurrentTranscript('');
     setFilteredNoise('');
   };
 
-  /**
-   * Delete transaction
-   */
   const handleDeleteTransaction = (txnId) => {
-    if (window.confirm('क्या आप इस लेनदेन को हटाना चाहते हैं?')) {
+    if (window.confirm('Delete this transaction?')) {
       setTransactions(transactions.filter(t => t.id !== txnId));
     }
   };
 
-  /**
-   * Reset all data to factory initial state
-   */
-  const handleResetAllData = () => {
-    storage.resetAll();
-    window.location.reload();
+  const handleLanguageModalSave = ({ language, groqApiKey }) => {
+    localStorage.setItem('gallavoice_welcome_seen_v1', 'true');
+    setSettings(prev => ({
+      ...prev,
+      speechLanguage: language,
+      groqApiKey: groqApiKey || prev.groqApiKey,
+      engine: groqApiKey ? 'GROQ_LLAMA' : prev.engine
+    }));
   };
 
   return (
-    <div className="min-h-full bg-stone-100 flex flex-col">
-      {/* Top Header Bar */}
+    <div className="min-h-full bg-stone-100 flex flex-col font-sans">
+      {/* Top Header */}
       <Header
         settings={settings}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenRateCard={() => setIsRateCardOpen(true)}
+        onOpenLanguageModal={() => setIsLanguageModalOpen(true)}
         transactions={transactions}
-        customers={customers}
-        rateCard={rateCard}
         totalUdhaar={totalUdhaar}
         totalJama={totalJama}
       />
 
-      {/* Main Workspace Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col gap-6">
-        {/* 1-Click Simulate Noisy Galla Audio Test Bar */}
-        <AudioPresetBar
-          onSelectPreset={handleSelectPreset}
-          isProcessing={isProcessing}
-        />
-
-        {/* Dashboard 2-Column Responsive Layout */}
+      {/* Main Workspace Layout */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 flex flex-col gap-6">
+        {/* 2-Column Responsive Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* LEFT PANEL: Galla Voice Controller & Staging Card */}
+          {/* LEFT COLUMN: Voice Controller or Staging Card */}
           <div className="lg:col-span-5 space-y-6">
-            {/* The Staging Card with TWO GIANT ICON BUTTONS */}
             {stagedDraft ? (
               <StagingCard
                 stagedDraft={stagedDraft}
@@ -296,33 +334,37 @@ export default function App() {
                 onContinue={handleContinue}
                 isTtsSpeaking={isTtsSpeaking}
                 onReplayAudio={handleReplayAudio}
+                language={currentLanguage}
               />
             ) : (
               <GallaVoiceController
-                onTranscriptReady={handleProcessTranscript}
+                onAudioRecorded={handleAudioRecorded}
+                onManualTextSubmit={handleProcessTranscript}
                 isProcessing={isProcessing}
                 currentTranscript={currentTranscript}
                 filteredNoise={filteredNoise}
-                onReset={handleRetry}
+                language={currentLanguage}
+                hasApiKey={Boolean(effectiveGroqKey)}
+                onOpenSettings={() => setIsSettingsOpen(true)}
               />
             )}
           </div>
 
-          {/* RIGHT PANEL: Live Local Khata Tables & Customer Ledger */}
-          <div className="lg:col-span-7 flex flex-col h-full space-y-4">
-            {/* Tab Switcher */}
+          {/* RIGHT COLUMN: Live Local Khata Ledger */}
+          <div className="lg:col-span-7 flex flex-col space-y-4">
+            {/* Tab Navigation */}
             <div className="flex items-center justify-between bg-stone-200/80 p-1 rounded-2xl">
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => setActiveTab('TRANSACTIONS')}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
                     activeTab === 'TRANSACTIONS'
-                      ? 'bg-white text-stone-900 shadow-sm'
+                      ? 'bg-white text-stone-900 shadow-xs'
                       : 'text-stone-600 hover:text-stone-900'
                   }`}
                 >
                   <Receipt className="w-4 h-4 text-orange-600" />
-                  <span>रोजनामचा (All Transactions)</span>
+                  <span>{currentLanguage === 'hi' ? 'रोजनामचा (Transactions)' : 'All Transactions'}</span>
                   <span className="bg-stone-100 text-stone-700 text-[10px] px-1.5 py-0.2 rounded-full border">
                     {transactions.length}
                   </span>
@@ -330,27 +372,27 @@ export default function App() {
 
                 <button
                   onClick={() => setActiveTab('CUSTOMERS')}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
                     activeTab === 'CUSTOMERS'
-                      ? 'bg-white text-stone-900 shadow-sm'
+                      ? 'bg-white text-stone-900 shadow-xs'
                       : 'text-stone-600 hover:text-stone-900'
                   }`}
                 >
                   <Users className="w-4 h-4 text-amber-600" />
-                  <span>ग्राहक खाता (Customer Ledger)</span>
+                  <span>{currentLanguage === 'hi' ? 'ग्राहक खाता (Customers)' : 'Customer Ledgers'}</span>
                   <span className="bg-stone-100 text-stone-700 text-[10px] px-1.5 py-0.2 rounded-full border">
                     {customers.length}
                   </span>
                 </button>
               </div>
 
-              <div className="text-[11px] text-stone-500 font-medium pr-3 hidden sm:block">
-                ⚡ Persisted locally in browser
-              </div>
+              <span className="text-[11px] text-stone-500 font-semibold pr-3 hidden sm:inline">
+                Persistent Local Database
+              </span>
             </div>
 
-            {/* Tab Views */}
-            <div className="flex-1">
+            {/* Active Tab View */}
+            <div>
               {activeTab === 'TRANSACTIONS' ? (
                 <TransactionsTable
                   transactions={transactions}
@@ -371,6 +413,14 @@ export default function App() {
       </main>
 
       {/* Modals */}
+      <LanguageSelectModal
+        isOpen={isLanguageModalOpen}
+        onClose={() => setIsLanguageModalOpen(false)}
+        currentLanguage={currentLanguage}
+        groqKey={settings.groqApiKey}
+        onSave={handleLanguageModalSave}
+      />
+
       <RateCardModal
         isOpen={isRateCardOpen}
         onClose={() => setIsRateCardOpen(false)}
@@ -383,7 +433,10 @@ export default function App() {
         onClose={() => setIsSettingsOpen(false)}
         settings={settings}
         onSaveSettings={setSettings}
-        onResetAllData={handleResetAllData}
+        onResetAllData={() => {
+          storage.resetAll();
+          window.location.reload();
+        }}
         transactions={transactions}
         customers={customers}
         rateCard={rateCard}

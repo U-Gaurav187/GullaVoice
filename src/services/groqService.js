@@ -1,13 +1,27 @@
 /**
- * Groq Cloud AI Service (Whisper Large v3 Turbo & Llama 3.3 70B Versatile)
- * Phase 2 Cloud Upgrade: Free ultra-fast LLM JSON extraction with 0 credit card required.
+ * Groq Cloud AI Engine (Whisper Large v3 Turbo & Llama 3.3 70B Versatile)
+ * Provides ultra-fast (~300ms) voice transcription and ledger JSON extraction.
  */
 
-export const GALLA_SYSTEM_PROMPT = `You are an expert Indian Kirana store ledger parser ('Galla AI'). Input comes from a noisy microphone where the shopkeeper speaks Hinglish/Hindi while sitting at the cash counter.
-1. NOISE FILTERING: Strip out all mid-sentence interruptions, price quotes to other customers (e.g., 'dudh 40 ka ho gaya hai'), talk to helpers ('chhotu packet de'), and filler words, even if there are no transition markers like 'kaha tha me'.
-2. ACCENT & PHONETIC MATCHING: Match accented customer names ('Rames', 'Ramess') against the provided existing_customers list.
-3. ACCENT NUMBER CORRECTION: Disambiguate phonetic number confusions (e.g., 15 vs 50 vs 500, 'dedh sau'=150, 'dhai sau'=250, 'pav'=0.25, 'aadha'=0.5) by cross-checking with the store rate_card.
-4. HINDI TTS GENERATION: Generate a natural Devanagari Hindi sentence ('tts_hindi_readback') summarizing the customer, items, total amount in rupees, and transaction type so the shopkeeper can verify by listening.
+export const GALLA_SYSTEM_PROMPT = `You are an expert Indian Kirana store ledger AI ('Galla AI').
+Your job is to parse spoken voice commands from shopkeepers sitting at noisy cash counters.
+
+RULES:
+1. NOISE & DISTURBANCE FILTERING:
+   Strip out all ambient counter side-chatter, customer haggling (e.g., 'dudh 40 ka ho gaya', 'wo 2 rupee ki hai'), shouts to store helpers ('chhotu packet de de', 'chhotu chai le aa'), and filler words even if there is no resumption marker like 'kaha tha me'.
+
+2. CUSTOMER MATCHING:
+   Match accented spoken names (e.g., 'Rames', 'Ramess', 'Rameshwar', 'Sarma') against the provided existing_customers list.
+
+3. ACCENT NUMBER & COLLOQUIAL DISAMBIGUATION:
+   Convert colloquial Hindi/Indian terms:
+   - 'dedh sau' = 150, 'dhai sau' = 250, 'sawa sau' = 125, 'paune do sau' = 175
+   - 'aadha kilo' = 0.5 kg, 'pav kilo' / 'pao' = 0.25 kg, 'paun kilo' = 0.75 kg, 'dedh kilo' = 1.5 kg
+   - Catch phonetically ambiguous numbers (15 vs 50 vs 500) using the store rate card.
+
+4. DUAL-LANGUAGE VOICE READBACK:
+   - If language is 'hi', generate 'tts_readback' in clear, natural Devanagari Hindi (e.g. 'रमेश भाई के खाते में दो किलो चीनी और एक पैकेट तेल, कुल दो सौ अट्ठाईस रुपये उधार। क्या इसे सेव करें?').
+   - If language is 'en', generate 'tts_readback' in natural Indian English (e.g. 'Added 2 kg Sugar and 1 packet Oil to Ramesh Bhai ledger, total 228 rupees credit. Should I save this?').
 
 Respond ONLY with valid JSON conforming strictly to this schema:
 {
@@ -26,22 +40,62 @@ Respond ONLY with valid JSON conforming strictly to this schema:
   "total_amount_inr": 0,
   "transaction_type": "UDHAAR | JAMA",
   "ignored_side_chatter": "string",
-  "tts_hindi_readback": "string (Devanagari Hindi sentence for voice readback)"
+  "tts_readback": "string (Voice confirmation sentence in requested language)",
+  "tts_hindi_readback": "string (Always provide Hindi version as well)"
 }`;
 
-export async function parseWithGroqLlama({ apiKey, transcript, customers = [], rateCard = [] }) {
+/**
+ * Transcribe Audio Blob using Groq Whisper Large v3 Turbo
+ */
+export async function transcribeWithGroqWhisper(apiKey, audioBlob, language = 'hi') {
   if (!apiKey) {
-    throw new Error('Groq API Key is missing. Please add your key in Settings or .env.local.');
+    throw new Error('Groq API Key is missing. Please enter your free Groq API key.');
+  }
+
+  const formData = new FormData();
+  formData.append('file', audioBlob, 'counter_recording.webm');
+  formData.append('model', 'whisper-large-v3-turbo');
+  // Bias Whisper prompt for common Indian grocery & dukandaar vocabulary
+  formData.append('prompt', 'Kirana shop, Ramesh bhai, Sunita bhabhi, cheeni, tel, dudh, chawal, atta, dal, udhaar, jama, khata, rupaye, kilo, packet');
+  if (language === 'hi') {
+    formData.append('language', 'hi');
+  }
+
+  const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey.trim()}`
+    },
+    body: formData
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error?.message || `Groq Whisper Error: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return (data.text || '').trim();
+}
+
+/**
+ * Extract structured ledger transaction JSON from transcript using Groq Llama 3.3 70B
+ */
+export async function parseWithGroqLlama({ apiKey, transcript, customers = [], rateCard = [], language = 'hi' }) {
+  if (!apiKey) {
+    throw new Error('Groq API Key is missing. Please enter your free Groq API key.');
   }
 
   const userContext = `
+LANGUAGE PREFERENCE: ${language === 'hi' ? 'Hindi (Devanagari)' : 'English / Hinglish'}
+
 EXISTING CUSTOMERS IN STORE DATABASE:
 ${JSON.stringify(customers.map(c => ({ id: c.id, name: c.name, aliases: c.aliases })), null, 2)}
 
 STORE RATE CARD (Price per unit in INR):
 ${JSON.stringify(rateCard.map(r => ({ name: r.name, unitPrice: r.unitPrice, unit: r.unit, aliases: r.aliases })), null, 2)}
 
-RAW SPOKEN TRANSCRIPT FROM GALLA MICROPHONE:
+RAW SPOKEN TRANSCRIPT FROM MICROPHONE:
 "${transcript}"
 `;
 
@@ -64,7 +118,7 @@ RAW SPOKEN TRANSCRIPT FROM GALLA MICROPHONE:
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || `Groq API Error: ${response.status} ${response.statusText}`);
+    throw new Error(errorData.error?.message || `Groq Llama Error: ${response.status} ${response.statusText}`);
   }
 
   const data = await response.json();
@@ -74,33 +128,4 @@ RAW SPOKEN TRANSCRIPT FROM GALLA MICROPHONE:
   }
 
   return JSON.parse(rawContent);
-}
-
-/**
- * Transcribes audio blob using Groq Whisper Large v3 Turbo
- */
-export async function transcribeWithGroqWhisper(apiKey, audioBlob) {
-  if (!apiKey) throw new Error('Groq API Key is required for Whisper speech-to-text.');
-
-  const formData = new FormData();
-  formData.append('file', audioBlob, 'recording.webm');
-  formData.append('model', 'whisper-large-v3-turbo');
-  formData.append('language', 'hi'); // Hindi / Hinglish model guide
-  formData.append('temperature', '0.0');
-
-  const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey.trim()}`
-    },
-    body: formData
-  });
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `Groq Whisper failed: ${response.status}`);
-  }
-
-  const data = await response.json();
-  return data.text || '';
 }

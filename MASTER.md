@@ -184,14 +184,14 @@ Extracted segments are passed to the frontend and rendered in an explicit `<span
 
 ## 5. Phase 1 (Active) vs Phase 2 (Extension Points)
 
-| Feature | Phase 1: Local Zero-Key (Active Default) | Phase 2: Free Cloud AI Upgrade |
+| Feature | AI-First Cloud Engine (Primary) | Local Zero-Key Fallback |
 |---|---|---|
-| **Speech-to-Text** | Native Browser `webkitSpeechRecognition` (`hi-IN`) + 1-Click Preset Simulators | Groq `whisper-large-v3-turbo` |
-| **Parsing Engine** | `src/services/localParser.js` (Regex + Phonetic Fuzzy Normalizer) | Groq `llama-3.3-70b-versatile` OR Google `gemini-2.5-flash` |
-| **Price Sanity** | Local Rate Card Table | Rate Card embedded into LLM System Prompt |
-| **TTS Readback** | Native Browser `speechSynthesis` (`hi-IN`) | Native Browser `speechSynthesis` (`hi-IN`) |
+| **Speech-to-Text** | Direct `MediaRecorder` Audio Blob $\rightarrow$ Groq `whisper-large-v3-turbo` | Test Presets & Manual Spoken Text Fallback |
+| **Parsing Engine** | Groq `llama-3.3-70b-versatile` (Temperature 0.1, JSON Object mode) | `src/services/localParser.js` (Regex + Phonetic Fuzzy Normalizer) |
+| **Language Selection** | Startup Modal: 🇮🇳 Hindi (Devanagari) or 🇬🇧 Indian English | Dual-language TTS voice & readback sentence |
+| **Price Sanity** | Local Rate Card Table embedded into prompt | Local Rate Card Table cross-checker |
+| **TTS Readback** | Native Browser `speechSynthesis` (`hi-IN` or `en-IN`) | Native Browser `speechSynthesis` |
 | **Persistence** | `localStorage` (`gallavoice_transactions_v1`) | `localStorage` + CSV/JSON Exporters |
-| **API Keys** | **None Required** | Groq Key (`console.groq.com/keys`) or Google Key (`aistudio.google.com/app/apikey`) |
 
 ### How to Toggle Engines:
 1. Open the web app on `http://localhost:5173`.
