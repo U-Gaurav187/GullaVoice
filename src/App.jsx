@@ -20,6 +20,7 @@ import CustomerKhataTable from './components/CustomerKhataTable.jsx';
 import RateCardModal from './components/RateCardModal.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import LanguageSelectModal from './components/LanguageSelectModal.jsx';
+import PurchaseDetailModal from './components/PurchaseDetailModal.jsx';
 
 import { storage } from './utils/storage.js';
 import { speechTTS } from './utils/speechTTS.js';
@@ -47,6 +48,8 @@ export default function App() {
   const [isRateCardOpen, setIsRateCardOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLanguageModalOpen, setIsLanguageModalOpen] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState(null);
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
 
   // First-time startup modal check
   useEffect(() => {
@@ -333,18 +336,25 @@ export default function App() {
       targetCustomerId = newCustId;
     }
 
+    const matchedCust = updatedCustomers.find(c => c.id === targetCustomerId);
+    const customerHindi = matchedCust?.hindiName || stagedDraft.matched_customer_name || customerName;
+    const customerUp = matchedCust?.upNativeName || 'मान्य ग्राहक';
+
     const newTransaction = {
       id: txnId,
       timestamp: nowIso,
       customerSpoken: stagedDraft.customer_spoken || customerName,
       matchedCustomerId: targetCustomerId,
       customerName: customerName,
+      customerHindiName: customerHindi,
+      customerUpName: customerUp,
       matchConfidence: stagedDraft.match_confidence || 1.0,
       transactionType: stagedDraft.transaction_type || 'UDHAAR',
       items: (stagedDraft.items || []).map(it => ({
         name: it.name,
         quantity: it.quantity,
-        calculatedPrice: it.calculated_price_inr,
+        unitPrice: it.unitPrice || it.unit_price || 0,
+        calculatedPrice: it.calculated_price_inr || it.calculatedPrice || 0,
         accentNote: it.accent_correction_note || null
       })),
       totalAmount: amount,
@@ -396,11 +406,14 @@ export default function App() {
     <div className="min-h-full bg-stone-100 flex flex-col font-sans">
       {/* Top Header */}
       <Header
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
         settings={settings}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenRateCard={() => setIsRateCardOpen(true)}
         onOpenLanguageModal={() => setIsLanguageModalOpen(true)}
         transactions={transactions}
+        customers={customers}
         totalUdhaar={totalUdhaar}
         totalJama={totalJama}
       />
@@ -409,7 +422,7 @@ export default function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 flex flex-col gap-6">
         {/* 2-Column Responsive Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* LEFT COLUMN: Voice Controller or Staging Card */}
+          {/* LEFT COLUMN: Clean Minimalist Voice Controller or Staging Card */}
           <div className="lg:col-span-5 space-y-6">
             {stagedDraft ? (
               <StagingCard
@@ -434,67 +447,40 @@ export default function App() {
             )}
           </div>
 
-          {/* RIGHT COLUMN: Live Local Khata Ledger */}
+          {/* RIGHT COLUMN: Live Ledger View (Driven directly by Top Header!) */}
           <div className="lg:col-span-7 flex flex-col space-y-4">
-            {/* Tab Navigation */}
-            <div className="flex items-center justify-between bg-stone-200/80 p-1 rounded-2xl">
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setActiveTab('TRANSACTIONS')}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                    activeTab === 'TRANSACTIONS'
-                      ? 'bg-white text-stone-900 shadow-xs'
-                      : 'text-stone-600 hover:text-stone-900'
-                  }`}
-                >
-                  <Receipt className="w-4 h-4 text-orange-600" />
-                  <span>{currentLanguage === 'hi' ? 'रोजनामचा (Transactions)' : 'All Transactions'}</span>
-                  <span className="bg-stone-100 text-stone-700 text-[10px] px-1.5 py-0.2 rounded-full border">
-                    {transactions.length}
-                  </span>
-                </button>
-
-                <button
-                  onClick={() => setActiveTab('CUSTOMERS')}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                    activeTab === 'CUSTOMERS'
-                      ? 'bg-white text-stone-900 shadow-xs'
-                      : 'text-stone-600 hover:text-stone-900'
-                  }`}
-                >
-                  <Users className="w-4 h-4 text-amber-600" />
-                  <span>{currentLanguage === 'hi' ? 'ग्राहक खाता (Customers)' : 'Customer Ledgers'}</span>
-                  <span className="bg-stone-100 text-stone-700 text-[10px] px-1.5 py-0.2 rounded-full border">
-                    {customers.length}
-                  </span>
-                </button>
-              </div>
-
-              <span className="text-[11px] text-stone-500 font-semibold pr-3 hidden sm:inline">
-                Persistent Local Database
-              </span>
-            </div>
-
             {/* Active Tab View */}
-            <div>
+            <div className="h-full">
               {activeTab === 'TRANSACTIONS' ? (
                 <TransactionsTable
                   transactions={transactions}
                   onDeleteTransaction={handleDeleteTransaction}
+                  onSelectTransaction={setSelectedTransaction}
                   newestTxnId={newestTxnId}
+                  language={currentLanguage}
                 />
               ) : (
                 <CustomerKhataTable
                   customers={customers}
-                  onRecordQuickPayment={(c) => {
-                    handleProcessTranscript(`${c.name} ko 100 rupaye jama`);
-                  }}
+                  onSelectCustomer={setSelectedCustomer}
+                  language={currentLanguage}
                 />
               )}
             </div>
           </div>
         </div>
       </main>
+
+      {/* Purchase Details Modal (Shows exact purchases and exact time) */}
+      <PurchaseDetailModal
+        transaction={selectedTransaction}
+        customer={selectedCustomer}
+        onClose={() => {
+          setSelectedTransaction(null);
+          setSelectedCustomer(null);
+        }}
+        language={currentLanguage}
+      />
 
       {/* Modals */}
       <LanguageSelectModal
