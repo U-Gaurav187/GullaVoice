@@ -50,8 +50,20 @@ export const DISTURBANCE_PATTERNS = [
   /ha\s+toh\s+kaha\s+the/gi,
   /are\s+ha\s+suno/gi,
   /acha\s+suno/gi,
+  /ha\s+suno/gi,
+  /arre?\s+suno/gi,
+  /suno\s+bhai/gi,
+  /bhaiya\s+suno/gi,
   /are\s+ruko/gi,
-  /are\s+bhai/gi
+  /are\s+bhai/gi,
+  /(हाँ|हा)\s+कहा\s+था\s+में/gi,
+  /(कहा|कहाँ)\s+था\s+मैं/gi,
+  /कहाँ\s+थे\s+हम/gi,
+  /हाँ\s+सुनो/gi,
+  /अरे\s+सुनो/gi,
+  /अच्छा\s+सुनो/gi,
+  /अरे\s+रुको/gi,
+  /अरे\s+भाई/gi
 ];
 
 /**

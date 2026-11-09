@@ -21,6 +21,8 @@ import RateCardModal from './components/RateCardModal.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import LanguageSelectModal from './components/LanguageSelectModal.jsx';
 import PurchaseDetailModal from './components/PurchaseDetailModal.jsx';
+import VoiceAssistantAnswerCard from './components/VoiceAssistantAnswerCard.jsx';
+import AudioPresetBar from './components/AudioPresetBar.jsx';
 
 import { storage } from './utils/storage.js';
 import { speechTTS } from './utils/speechTTS.js';
@@ -41,6 +43,7 @@ export default function App() {
   const [currentTranscript, setCurrentTranscript] = useState('');
   const [filteredNoise, setFilteredNoise] = useState('');
   const [stagedDraft, setStagedDraft] = useState(null);
+  const [voiceQueryResult, setVoiceQueryResult] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isTtsSpeaking, setIsTtsSpeaking] = useState(false);
   const [newestTxnId, setNewestTxnId] = useState(null);
@@ -159,10 +162,12 @@ export default function App() {
   /**
    * Direct text processing (from preset or manual input)
    */
-  const handleProcessTranscript = async (text) => {
+  const handleProcessTranscript = async (input) => {
+    const text = typeof input === 'string' ? input : input?.spokenText || '';
     if (!text || !text.trim()) return;
     setIsProcessing(true);
     speechTTS.stop();
+    setVoiceQueryResult(null);
     setCurrentTranscript(text);
 
     try {
@@ -214,7 +219,7 @@ export default function App() {
     // 3. Fallback to Local Deterministic Engine
     if (!parsedResult) {
       console.log('⚡ Falling back to zero-key local deterministic parser...');
-      parsedResult = parseKiranaVoiceLocally(transcriptText, customers, rateCard);
+      parsedResult = parseKiranaVoiceLocally(transcriptText, customers, rateCard, transactions);
     }
 
     // Verify / strengthen customer match using phonetic matching
@@ -300,6 +305,45 @@ export default function App() {
       }
     }
 
+    // Step: Check if intent is a 2-Way Conversational Ledger Query
+    const isQueryIntent = [
+      'CHECK_BALANCE',
+      'CHECK_TODAY_SUMMARY',
+      'CHECK_HIGHEST_UDHAAR',
+      'CHECK_TOTAL_STORE_BALANCE'
+    ].includes(parsedResult.intent);
+
+    if (isQueryIntent) {
+      setStagedDraft(null);
+      // Hydrate customer data if available
+      let custData = parsedResult.customer_data;
+      if (!custData && parsedResult.matched_customer_id) {
+        custData = customers.find(c => c.id === parsedResult.matched_customer_id);
+      } else if (!custData && parsedResult.matched_customer_name) {
+        custData = customers.find(c => c.name.toLowerCase() === parsedResult.matched_customer_name.toLowerCase());
+      }
+
+      setVoiceQueryResult({
+        ...parsedResult,
+        customer_data: custData,
+        rawTranscript: transcriptText
+      });
+      setFilteredNoise(parsedResult.ignored_side_chatter || '');
+
+      const readbackSentence = currentLanguage === 'hi'
+        ? (parsedResult.tts_hindi_readback || parsedResult.tts_readback)
+        : (parsedResult.tts_readback || parsedResult.tts_hindi_readback);
+
+      if (readbackSentence) {
+        setTimeout(() => {
+          speechTTS.speak(readbackSentence, currentLanguage);
+        }, 150);
+      }
+      return;
+    }
+
+    setVoiceQueryResult(null);
+
     const isNoiseOnly = parsedResult.intent === 'NOISE_ONLY' || 
       ((!parsedResult.items || parsedResult.items.length === 0) && Number(parsedResult.total_amount_inr) === 0);
 
@@ -350,6 +394,7 @@ export default function App() {
   const handleRetry = () => {
     speechTTS.stop();
     setStagedDraft(null);
+    setVoiceQueryResult(null);
     setCurrentTranscript('');
     setFilteredNoise('');
   };
@@ -496,6 +541,7 @@ export default function App() {
     }, 150);
 
     setStagedDraft(null);
+    setVoiceQueryResult(null);
     setCurrentTranscript('');
     setFilteredNoise('');
   };
@@ -535,7 +581,28 @@ export default function App() {
         {activeTab === 'VOICE' ? (
           /* THE FULL HERO MIC INTERFACE (DOMINATES SCREEN ON HOME) */
           <div className="max-w-xl w-full mx-auto space-y-6 animate-in fade-in zoom-in-95 duration-200">
-            {stagedDraft ? (
+            {voiceQueryResult ? (
+              <VoiceAssistantAnswerCard
+                queryResult={voiceQueryResult}
+                onClose={() => setVoiceQueryResult(null)}
+                onReplayAudio={() => {
+                  const s = currentLanguage === 'hi'
+                    ? (voiceQueryResult.tts_hindi_readback || voiceQueryResult.tts_readback)
+                    : (voiceQueryResult.tts_readback || voiceQueryResult.tts_hindi_readback);
+                  if (s) speechTTS.speak(s, currentLanguage);
+                }}
+                onViewCustomer={(cust) => {
+                  setSelectedCustomer(cust);
+                  setActiveTab('CUSTOMERS');
+                  setVoiceQueryResult(null);
+                }}
+                onViewTransactions={() => {
+                  setActiveTab('TRANSACTIONS');
+                  setVoiceQueryResult(null);
+                }}
+                language={currentLanguage}
+              />
+            ) : stagedDraft ? (
               <StagingCard
                 stagedDraft={stagedDraft}
                 onRetry={handleRetry}
@@ -545,16 +612,23 @@ export default function App() {
                 language={currentLanguage}
               />
             ) : (
-              <GallaVoiceController
-                onAudioRecorded={handleAudioRecorded}
-                onManualTextSubmit={handleProcessTranscript}
-                isProcessing={isProcessing}
-                currentTranscript={currentTranscript}
-                filteredNoise={filteredNoise}
-                language={currentLanguage}
-                hasApiKey={Boolean(effectiveGroqKey)}
-                onOpenSettings={() => setIsSettingsOpen(true)}
-              />
+              <>
+                <GallaVoiceController
+                  onAudioRecorded={handleAudioRecorded}
+                  onManualTextSubmit={handleProcessTranscript}
+                  isProcessing={isProcessing}
+                  currentTranscript={currentTranscript}
+                  filteredNoise={filteredNoise}
+                  language={currentLanguage}
+                  hasApiKey={Boolean(effectiveGroqKey)}
+                  onOpenSettings={() => setIsSettingsOpen(true)}
+                />
+
+                <AudioPresetBar
+                  onSelectPreset={(preset) => handleProcessTranscript(preset.spokenText)}
+                  isProcessing={isProcessing}
+                />
+              </>
             )}
           </div>
         ) : activeTab === 'TRANSACTIONS' ? (

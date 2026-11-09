@@ -41,8 +41,20 @@ OPERATIONAL KIRANA DISCOURSE & LEDGER RULES (CRITICAL):
      * "सेव" / "सेब" / "नमकीन" -> Sev (₹160/kg)
    - If unit price or total amount is not explicitly stated in spoken command, compute total_amount_inr by multiplying quantity * rateCard.unitPrice!
 
-4. DUAL-LANGUAGE VOICE READBACK:
-   - "tts_hindi_readback": Clear, natural Devanagari Hindi readback confirming the customer name, items, and total amount.
+4. TWO-WAY CONVERSATIONAL LEDGER QUERIES (REVERSE VOICE KHATA):
+   - When the shopkeeper asks about a customer's balance (e.g. "Ramesh ka kitna udhaar baaki hai?", "Ramesh bhai ka khata batao", "kitna baaki hai"):
+     * Set "intent": "CHECK_BALANCE"
+     * Match customer name from EXISTING CUSTOMERS IN STORE DATABASE
+     * In "tts_hindi_readback", answer clearly (e.g. "<Customer> के खाते में कुल ₹... उधार बाकी है।")
+   - When asked about today's sales (e.g. "Aaj kitni sale hui?", "Aaj kitna udhaar hua?"):
+     * Set "intent": "CHECK_TODAY_SUMMARY"
+   - When asked about highest debtor (e.g. "Sabse zyada udhaar kiske paas hai?"):
+     * Set "intent": "CHECK_HIGHEST_UDHAAR"
+   - When asked about store total (e.g. "Dukan me kul kitna udhaar hai?"):
+     * Set "intent": "CHECK_TOTAL_STORE_BALANCE"
+
+5. DUAL-LANGUAGE VOICE READBACK:
+   - "tts_hindi_readback": Clear, natural Devanagari Hindi readback confirming the customer name, items, and total amount, or speaking the direct query answer.
    - "tts_readback": English/Hinglish readback.
 
 Respond strictly in valid JSON conforming to this schema:
@@ -54,7 +66,7 @@ Respond strictly in valid JSON conforming to this schema:
       "action": "TARGET | RECORD | IGNORE"
     }
   ],
-  "intent": "CREATE_UDHAAR | RECEIVE_JAMA | CHECK_BALANCE | NOISE_ONLY",
+  "intent": "CREATE_UDHAAR | RECEIVE_JAMA | CHECK_BALANCE | CHECK_TODAY_SUMMARY | CHECK_HIGHEST_UDHAAR | CHECK_TOTAL_STORE_BALANCE | NOISE_ONLY",
   "customer_spoken": "string",
   "matched_customer_name": "string",
   "match_confidence": 0.95,

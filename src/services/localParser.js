@@ -10,7 +10,7 @@ import { matchCustomerPhonetically } from '../utils/phoneticMatcher.js';
 import { checkRateCardSanity } from '../utils/rateCardSanity.js';
 import { buildHindiReadback } from '../utils/hindiDevanagariHelper.js';
 
-export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rateCard = []) {
+export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rateCard = [], transactions = []) {
   if (!rawTranscript || !rawTranscript.trim()) {
     return {
       intent: 'NOISE_ONLY',
@@ -48,7 +48,224 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
   // Step 2: Normalize numbers & colloquial quantities ("dedh sau", "aadha kilo", etc.)
   const normalizedText = normalizeColloquialQuantities(cleanedCommand);
 
-  // Step 3: Determine Intent (UDHAAR vs JAMA vs CHECK_BALANCE vs NOISE_ONLY)
+  // Step 2.5: Check for 2-Way Conversational Ledger Queries
+  // Examples:
+  // - "Ramesh ka kitna udhaar baaki hai?" / "रमेश भाई का खाता बताओ"
+  // - "Aaj kitni sale hui?" / "Aaj kitna udhaar hua?"
+  // - "Sabse zyada udhaar kiske paas hai?"
+  // - "Dukan me kul kitna udhaar hai?"
+  const isQuery = /\b(kitna|kitni|kitne|batao|dikhao|kiske|kiska|kisko|check|hisab|hisaab|balance|sale|bikri|dhandha)\b|कितना|कितनी|कितने|बताओ|दिखाओ|किसका|किसके|किसको|चेक|हिसाब|बैलेंस|सेल|बिक्री|धंधा/i.test(normalizedText);
+
+  // 1. Highest Debtor Query (e.g. "Sabse zyada udhaar kiske paas hai?")
+  const isHighestQuery = /(sabse\s+zyada|sabse\s+bada|sabse\s+badi|top|highest)\s*(udhaar|baaki|baki|khata)?/i.test(normalizedText) ||
+    /(सबसे\s+ज्यादा|सबसे\s+बड़ा|सबसे\s+बड़ी|टॉप)\s*(उधार|बाकी|खाता)?/i.test(normalizedText);
+
+  if (isQuery && isHighestQuery) {
+    const sorted = [...customers].sort((a, b) => (b.totalUdhaar || 0) - (a.totalUdhaar || 0));
+    const topCust = sorted[0];
+    const topAmount = topCust ? (topCust.totalUdhaar || 0) : 0;
+
+    let tts_hindi_readback = '';
+    let tts_readback = '';
+
+    if (topCust && topAmount > 0) {
+      tts_hindi_readback = `दुकान में सबसे ज्यादा उधार ${topCust.name || topCust.hindiName} के पास है, कुल ${topAmount} रुपये बाकी है।`;
+      tts_readback = `The highest udhaar in the store is with ${topCust.name}, total ₹${topAmount}.`;
+    } else {
+      tts_hindi_readback = 'दुकान में किसी भी ग्राहक का उधार बाकी नहीं है, सभी खाते चुकता हैं।';
+      tts_readback = 'No outstanding udhaar with any customer in the store.';
+    }
+
+    return {
+      intent: 'CHECK_HIGHEST_UDHAAR',
+      query_type: 'HIGHEST_UDHAAR',
+      customer_spoken: topCust?.name || '',
+      matched_customer_name: topCust?.name || '',
+      matched_customer_id: topCust?.id || null,
+      total_amount_inr: topAmount,
+      customer_data: topCust,
+      items: [],
+      transaction_type: 'QUERY',
+      ignored_side_chatter: ignoredNoiseText,
+      tts_hindi_readback,
+      tts_readback,
+      query_answer: {
+        title: 'सबसे ज्यादा उधार (Top Debtor)',
+        customerName: topCust?.name || 'कोई नहीं',
+        mainMetric: `₹${topAmount.toLocaleString('en-IN')}`,
+        metricLabel: 'कुल उधार बाकी',
+        details: topCust ? `जमा: ₹${(topCust.totalJama || 0).toLocaleString('en-IN')}` : 'सभी खाते चुकता'
+      }
+    };
+  }
+
+  // 2. Today's Business Summary Query (e.g. "Aaj kitni sale hui?", "Aaj kitna udhaar hua?")
+  const isTodayQuery = /\b(aaj|today)\b/i.test(normalizedText) || /आज/i.test(normalizedText);
+  const isBusinessMetric = /(sale|bikri|dhandha|hisab|hisaab|udhaar|jama|kamai|kitna|kitni)/i.test(normalizedText) ||
+    /(सेल|बिक्री|धंधा|हिसाब|उधार|जमा|कमाई|कितना|कितनी)/i.test(normalizedText);
+
+  if (isQuery && isTodayQuery && isBusinessMetric && !/(khate|khata|bhai|bhabhi|ji)\b/i.test(normalizedText)) {
+    const todayStr = new Date().toDateString();
+    const todayTxns = (transactions || []).filter(t => {
+      const d = t.timestamp ? new Date(t.timestamp) : (t.date ? new Date(t.date) : null);
+      return d && d.toDateString() === todayStr;
+    });
+
+    const todayUdhaar = todayTxns.filter(t => t.type === 'UDHAAR').reduce((sum, t) => sum + (t.amount || t.totalAmount || 0), 0);
+    const todayJama = todayTxns.filter(t => t.type === 'JAMA').reduce((sum, t) => sum + (t.amount || t.totalAmount || 0), 0);
+    const todayCount = todayTxns.length;
+
+    const tts_hindi_readback = `आज दुकान में कुल ${todayCount} लेनदेन हुए: ${todayUdhaar} रुपये उधार और ${todayJama} रुपये जमा दर्ज किए गए।`;
+    const tts_readback = `Today: ${todayCount} transactions recorded. ₹${todayUdhaar} udhaar credit and ₹${todayJama} cash payment received.`;
+
+    return {
+      intent: 'CHECK_TODAY_SUMMARY',
+      query_type: 'TODAY_SUMMARY',
+      customer_spoken: '',
+      matched_customer_name: '',
+      matched_customer_id: null,
+      total_amount_inr: todayUdhaar + todayJama,
+      items: [],
+      transaction_type: 'QUERY',
+      ignored_side_chatter: ignoredNoiseText,
+      tts_hindi_readback,
+      tts_readback,
+      query_answer: {
+        title: 'आज का खाता व हिसाब (Today\'s Summary)',
+        mainMetric: `₹${(todayUdhaar + todayJama).toLocaleString('en-IN')}`,
+        metricLabel: `कुल लेनदेन: ${todayCount}`,
+        details: `उधार: ₹${todayUdhaar.toLocaleString('en-IN')} | जमा: ₹${todayJama.toLocaleString('en-IN')}`
+      }
+    };
+  }
+
+  // 3. Store Total Outstanding Query (e.g. "Dukan me kul kitna udhaar hai?")
+  const isStoreTotal = /(dukan|store|total|kul|dukaan)\s*(me|mein|ka|ki)?\s*(kul|total)?\s*(kitna|udhaar|baaki|baki|balance)/i.test(normalizedText) ||
+    /(दुकान|स्टोर|कुल|टोटल)\s*(में|का|की)?\s*(कुल|टोटल)?\s*(कितना|उधार|बाकी|बैलेंस)/i.test(normalizedText);
+
+  if (isQuery && isStoreTotal && !/(khate|khata|bhai|bhabhi|ji)\b/i.test(normalizedText)) {
+    const totalUdhaar = (customers || []).reduce((sum, c) => sum + (c.totalUdhaar || 0), 0);
+    const totalJama = (customers || []).reduce((sum, c) => sum + (c.totalJama || 0), 0);
+
+    const tts_hindi_readback = `दुकान में वर्तमान में कुल ${totalUdhaar} रुपये उधार बाकी है और ${totalJama} रुपये जमा है।`;
+    const tts_readback = `Total store outstanding udhaar is ₹${totalUdhaar}, and total jama is ₹${totalJama}.`;
+
+    return {
+      intent: 'CHECK_TOTAL_STORE_BALANCE',
+      query_type: 'STORE_TOTAL',
+      customer_spoken: '',
+      matched_customer_name: '',
+      matched_customer_id: null,
+      total_amount_inr: totalUdhaar,
+      items: [],
+      transaction_type: 'QUERY',
+      ignored_side_chatter: ignoredNoiseText,
+      tts_hindi_readback,
+      tts_readback,
+      query_answer: {
+        title: 'दुकान की कुल स्थिति (Store Outstanding)',
+        mainMetric: `₹${totalUdhaar.toLocaleString('en-IN')}`,
+        metricLabel: 'कुल उधार बाकी',
+        details: `कुल जमा: ₹${totalJama.toLocaleString('en-IN')}`
+      }
+    };
+  }
+
+  // 4. Customer Specific Balance Query (e.g. "Ramesh ka kitna udhaar baaki hai?", "रमेश भाई का खाता बताओ")
+  const isCustomerBalanceQuery = isQuery && (
+    /(kitna\s+udhaar|udhaar\s+kitna|kitna\s+baaki|kitna\s+baki|kitna\s+balance|balance\s+kitna|khata\s+batao|khata\s+dikhao|hisab\s+batao)/i.test(normalizedText) ||
+    /(कितना\s+उधार|उधार\s+कितना|कितना\s+बाकी|कितना\s+बैलेंस|बैलेंस\s+कितना|खाता\s+बताओ|खाता\s+दिखाओ|हिसाब\s+बताओ)/i.test(normalizedText) ||
+    /\b(khata|khate)\b.*(udhaar|baki|baaki)/i.test(normalizedText) ||
+    /(खाता|खाते).*(उधार|बाकी)/i.test(normalizedText)
+  );
+
+  if (isCustomerBalanceQuery) {
+    let spokenCust = '';
+    const custMatch = normalizedText.match(/(?:(?:ha\s+suno|suno|arre?|are|bhaiya)\s+)?([\p{L}\p{M}\s]+?)\s+(?:ka|ke|ki|ko|का|के|की|को)\s+(?:kitna|khata|khate|udhaar|udhar|balance|baaki|baki|hisab|hisaab)/iu);
+    if (custMatch) {
+      spokenCust = custMatch[1].trim();
+    } else {
+      spokenCust = normalizedText.split(/\s+/).slice(0, 2).join(' ');
+    }
+
+    const phoneticMatch = matchCustomerPhonetically(spokenCust, customers, 0.60);
+    const targetCust = phoneticMatch.isMatch ? phoneticMatch.customer : customers.find(c => 
+      c.name.toLowerCase().includes(spokenCust.toLowerCase()) || 
+      (c.hindiName && c.hindiName.includes(spokenCust))
+    );
+
+    if (targetCust) {
+      const udhaar = targetCust.totalUdhaar || 0;
+      const jama = targetCust.totalJama || 0;
+      const net = Math.max(0, udhaar - jama);
+
+      let tts_hindi_readback = '';
+      let tts_readback = '';
+
+      if (udhaar > 0 && jama > 0) {
+        tts_hindi_readback = `${targetCust.hindiName || targetCust.name} के खाते में कुल ${udhaar} रुपये उधार है और ${jama} रुपये जमा है। कुल बाकी ${net} रुपये है।`;
+        tts_readback = `${targetCust.name} has ₹${udhaar} udhaar and ₹${jama} payment. Net balance is ₹${net}.`;
+      } else if (udhaar > 0) {
+        tts_hindi_readback = `${targetCust.hindiName || targetCust.name} के खाते में कुल ${udhaar} रुपये उधार बाकी है।`;
+        tts_readback = `${targetCust.name} has ₹${udhaar} pending udhaar.`;
+      } else {
+        tts_hindi_readback = `${targetCust.hindiName || targetCust.name} का कोई उधार बाकी नहीं है, खाता चुकता है।`;
+        tts_readback = `${targetCust.name} has zero balance, account is fully settled.`;
+      }
+
+      return {
+        intent: 'CHECK_BALANCE',
+        query_type: 'CUSTOMER_BALANCE',
+        customer_spoken: spokenCust,
+        matched_customer_name: targetCust.name,
+        matched_customer_id: targetCust.id,
+        match_confidence: phoneticMatch.confidence || 0.95,
+        total_amount_inr: udhaar,
+        customer_data: targetCust,
+        items: [],
+        transaction_type: 'QUERY',
+        ignored_side_chatter: ignoredNoiseText,
+        tts_hindi_readback,
+        tts_readback,
+        query_answer: {
+          title: `${targetCust.name} का खाता`,
+          customerName: targetCust.name,
+          hindiName: targetCust.hindiName,
+          mainMetric: `₹${udhaar.toLocaleString('en-IN')}`,
+          metricLabel: 'कुल उधार बाकी',
+          details: `जमा: ₹${jama.toLocaleString('en-IN')}`
+        }
+      };
+    } else {
+      const tts_hindi_readback = `ग्राहक '${spokenCust}' का कोई खाता नहीं मिला। क्या नया खाता खोलना चाहते हैं?`;
+      const tts_readback = `No customer record found for '${spokenCust}'.`;
+
+      return {
+        intent: 'CHECK_BALANCE',
+        query_type: 'CUSTOMER_NOT_FOUND',
+        customer_spoken: spokenCust,
+        matched_customer_name: spokenCust,
+        matched_customer_id: null,
+        match_confidence: 0,
+        total_amount_inr: 0,
+        customer_data: null,
+        items: [],
+        transaction_type: 'QUERY',
+        ignored_side_chatter: ignoredNoiseText,
+        tts_hindi_readback,
+        tts_readback,
+        query_answer: {
+          title: 'ग्राहक नहीं मिला',
+          customerName: spokenCust,
+          mainMetric: 'रिकॉर्ड नहीं मिला',
+          metricLabel: 'खाता स्थिति',
+          details: 'कृपया ग्राहक का नाम सही से बोलें या नया खाता जोड़ें'
+        }
+      };
+    }
+  }
+
+  // Step 3: Determine Intent for Transactions (UDHAAR vs JAMA)
   const isJama = /\b(jama|diye|diya|pay|payment|jama karo|jama kar do|jama likho)\b|जमा|दिए|दिया/i.test(normalizedText);
   const isUdhaar = /\b(udhaar|udhar|baaki|baki|khate me|khate mein|likh do|likho|daal do|rakh do|ragda)\b|उधार|खाते में|खाते|लिख दो|रख दो|रगदा|रख दा|डाल दो|चढ़ा दो/i.test(normalizedText);
 
@@ -130,9 +347,12 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
         } else if (matchAfter) {
           qty = parseFloat(matchAfter[1]);
           if (matchAfter[3]) unit = matchAfter[3];
-        } else if (normalizedText.includes(term.toLowerCase())) {
-          // Mentioned without explicit quantity -> default to 1 unit
-          qty = 1;
+        } else {
+          // Check standalone word boundary so "batao" does not match "atta"
+          const wordRegex = new RegExp(`(?:^|[\\s,।])(?:ek\\s+)?${escaped}(?:[\\s,।]|$)`, 'iu');
+          if (wordRegex.test(normalizedText)) {
+            qty = 1;
+          }
         }
 
         if (qty > 0) {

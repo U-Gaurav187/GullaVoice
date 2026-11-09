@@ -68,5 +68,49 @@ export const NOISY_GALLA_PRESETS = [
     expectedItems: 'None',
     expectedType: 'NOISE_ONLY',
     expectedTotal: 0
+  },
+  {
+    id: 'preset_07',
+    title: "2-Way Query: Ramesh's Udhaar Balance",
+    tag: 'Reverse Voice Khata',
+    spokenText: 'Ramesh ka kitna udhaar baaki hai?',
+    description: 'Two-way voice assistant checks the customer ledger and answers their live balance aloud in Hindi.',
+    expectedCustomer: 'Ramesh',
+    expectedItems: 'Voice Inquiry',
+    expectedType: 'CHECK_BALANCE',
+    expectedTotal: 0
+  },
+  {
+    id: 'preset_08',
+    title: "2-Way Query: Today's Total Sales & Khata",
+    tag: "Today's Hisab",
+    spokenText: 'Aaj kitni sale hui aur kitna udhaar hua?',
+    description: 'Aggregates today\'s transactions and speaks out total udhaar and jama summary aloud.',
+    expectedCustomer: 'Store Ledger',
+    expectedItems: 'Daily Summary',
+    expectedType: 'CHECK_TODAY_SUMMARY',
+    expectedTotal: 0
+  },
+  {
+    id: 'preset_09',
+    title: '2-Way Query: Highest Udhaar in Store',
+    tag: 'Top Debtor Inquiry',
+    spokenText: 'Sabse zyada udhaar kiske paas hai?',
+    description: 'Finds the customer with maximum outstanding balance across the store and speaks the answer.',
+    expectedCustomer: 'Top Debtor',
+    expectedItems: 'Ranked Balance',
+    expectedType: 'CHECK_HIGHEST_UDHAAR',
+    expectedTotal: 0
+  },
+  {
+    id: 'preset_10',
+    title: 'Interrupted Query: Chatter + Balance Question',
+    tag: 'Chatter + 2-Way Query',
+    spokenText: 'Chhotu baraf le aa jaldi ha suno Ramesh bhai ka khata batao kitna baaki hai',
+    description: 'Filters helper dispatch noise ("Chhotu baraf le aa") and extracts the conversational balance query.',
+    expectedCustomer: 'Ramesh Bhai',
+    expectedItems: 'Filtered Query',
+    expectedType: 'CHECK_BALANCE',
+    expectedTotal: 0
   }
 ];

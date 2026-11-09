@@ -12,6 +12,7 @@ export default function GallaVoiceController({
   onManualTextSubmit,
   isProcessing,
   currentTranscript,
+  filteredNoise = '',
   language = 'hi'
 }) {
   const [isRecording, setIsRecording] = useState(false);
@@ -202,15 +203,38 @@ export default function GallaVoiceController({
         </div>
       )}
 
-      {/* Transcript Card (Only shown if text was recognized) */}
-      {currentTranscript && (
+      {/* Transcript Card (Only shown if text was recognized or noise was filtered) */}
+      {(currentTranscript || filteredNoise) && (
         <div className="w-full mt-2 p-3.5 rounded-2xl bg-stone-50 border border-stone-200 text-left">
-          <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1">
-            {language === 'hi' ? 'सुनी गई आवाज़:' : 'Recognized:'}
-          </span>
-          <p className="text-xs font-semibold text-stone-900 font-devanagari">
-            "{currentTranscript}"
-          </p>
+          {currentTranscript && (
+            <div>
+              <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1">
+                {language === 'hi' ? 'सुनी गई आवाज़:' : 'Recognized:'}
+              </span>
+              <p className="text-xs font-semibold text-stone-900 font-devanagari">
+                "{currentTranscript}"
+              </p>
+            </div>
+          )}
+
+          {/* Strikethrough Noise Badges if side chatter was filtered */}
+          {filteredNoise && (
+            <div className="mt-2 pt-2 border-t border-stone-200">
+              <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1">
+                {language === 'hi' ? 'हटाया गया काउंटर शोर (Filtered Chatter):' : 'Ignored Side Chatter:'}
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {filteredNoise.split('|').map(s => s.trim()).filter(Boolean).map((noise, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-stone-200 text-stone-600 text-[11px] font-mono line-through"
+                  >
+                    <s>{noise}</s>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
