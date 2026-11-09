@@ -21,10 +21,15 @@ export default function Header({
   transactions = [],
   customers = [],
   totalUdhaar = 0,
+  grossUdhaar,
   totalJama = 0
 }) {
   const isHindi = settings.speechLanguage === 'hi';
   const hasKey = Boolean(settings.groqApiKey || import.meta.env.VITE_GROQ_API_KEY);
+
+  // Authoritative net udhaar after deducting jama (e.g. ₹1,265 - ₹500 = ₹765 net udhaar remaining)
+  const netUdhaar = grossUdhaar !== undefined ? totalUdhaar : Math.max(0, totalUdhaar - totalJama);
+  const displayGross = grossUdhaar !== undefined ? grossUdhaar : (totalUdhaar + totalJama);
 
   return (
     <header className="bg-white border-b border-stone-200 sticky top-0 z-30 shadow-xs">
@@ -108,14 +113,20 @@ export default function Header({
 
         {/* Live Counters & Controls (Cleaned & Polished for Production) */}
         <div className="flex items-center gap-2.5 shrink-0">
-          {/* Live Counters */}
-          <div className="hidden lg:flex items-center gap-2 text-xs font-semibold">
-            <div className="bg-red-50 border border-red-200 px-2.5 py-1 rounded-xl flex items-center gap-1.5">
+          {/* Live Counters (Net Udhaar after deducting Jama) */}
+          <div className="hidden md:flex items-center gap-2 text-xs font-semibold">
+            <div 
+              className="bg-red-50 border border-red-200 px-2.5 py-1 rounded-xl flex items-center gap-1.5 transition-all shadow-2xs"
+              title={`शुद्ध बकाया उधार: ₹${netUdhaar.toLocaleString('en-IN')} (कुल उधार ₹${displayGross.toLocaleString('en-IN')} - जमा ₹${totalJama.toLocaleString('en-IN')})`}
+            >
               <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
               <span className="text-stone-500 text-[10px]">उधार:</span>
-              <span className="font-black text-red-600 text-xs">₹{totalUdhaar.toLocaleString('en-IN')}</span>
+              <span className="font-black text-red-600 text-xs">₹{netUdhaar.toLocaleString('en-IN')}</span>
             </div>
-            <div className="bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-xl flex items-center gap-1.5">
+            <div 
+              className="bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-xl flex items-center gap-1.5 transition-all shadow-2xs"
+              title={`कुल जमा राशि: ₹${totalJama.toLocaleString('en-IN')}`}
+            >
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
               <span className="text-stone-500 text-[10px]">जमा:</span>
               <span className="font-black text-emerald-600 text-xs">₹{totalJama.toLocaleString('en-IN')}</span>

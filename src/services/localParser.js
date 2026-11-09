@@ -107,9 +107,11 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
     /(सबसे\s+ज्यादा|सबसे\s+बड़ा|सबसे\s+बड़ी|टॉप)\s*(उधार|बाकी|खाता)?/i.test(normalizedText);
 
   if (isQuery && isHighestQuery) {
-    const sorted = [...customers].sort((a, b) => (b.totalUdhaar || 0) - (a.totalUdhaar || 0));
+    const sorted = [...customers].sort((a, b) => 
+      Math.max(0, (b.totalUdhaar || 0) - (b.totalJama || 0)) - Math.max(0, (a.totalUdhaar || 0) - (a.totalJama || 0))
+    );
     const topCust = sorted[0];
-    const topAmount = topCust ? (topCust.totalUdhaar || 0) : 0;
+    const topAmount = topCust ? Math.max(0, (topCust.totalUdhaar || 0) - (topCust.totalJama || 0)) : 0;
 
     let tts_hindi_readback = '';
     let tts_readback = '';
@@ -139,8 +141,8 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
         title: 'सबसे ज्यादा उधार (Top Debtor)',
         customerName: topCust?.name || 'कोई नहीं',
         mainMetric: `₹${topAmount.toLocaleString('en-IN')}`,
-        metricLabel: 'कुल उधार बाकी',
-        details: topCust ? `जमा: ₹${(topCust.totalJama || 0).toLocaleString('en-IN')}` : 'सभी खाते चुकता'
+        metricLabel: 'शुद्ध उधार बाकी',
+        details: topCust ? `कुल उधार: ₹${(topCust.totalUdhaar || 0).toLocaleString('en-IN')} | जमा: ₹${(topCust.totalJama || 0).toLocaleString('en-IN')}` : 'सभी खाते चुकता'
       }
     };
   }
@@ -190,11 +192,12 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
     /(दुकान|स्टोर|कुल|टोटल)\s*(में|का|की)?\s*(कुल|टोटल)?\s*(कितना|उधार|बाकी|बैलेंस)/i.test(normalizedText);
 
   if (isQuery && isStoreTotal && !/(khate|khata|bhai|bhabhi|ji)\b/i.test(normalizedText)) {
-    const totalUdhaar = (customers || []).reduce((sum, c) => sum + (c.totalUdhaar || 0), 0);
+    const grossStoreUdhaar = (customers || []).reduce((sum, c) => sum + (c.totalUdhaar || 0), 0);
     const totalJama = (customers || []).reduce((sum, c) => sum + (c.totalJama || 0), 0);
+    const netUdhaar = Math.max(0, grossStoreUdhaar - totalJama);
 
-    const tts_hindi_readback = `दुकान में वर्तमान में कुल ${totalUdhaar} रुपये उधार बाकी है और ${totalJama} रुपये जमा है।`;
-    const tts_readback = `Total store outstanding udhaar is ₹${totalUdhaar}, and total jama is ₹${totalJama}.`;
+    const tts_hindi_readback = `दुकान में ₹${totalJama} जमा काटकर, अब कुल ${netUdhaar} रुपये उधार बाकी है।`;
+    const tts_readback = `Total store net outstanding udhaar after deducting ₹${totalJama} jama is ₹${netUdhaar}.`;
 
     return {
       intent: 'CHECK_TOTAL_STORE_BALANCE',
@@ -202,7 +205,7 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
       customer_spoken: '',
       matched_customer_name: '',
       matched_customer_id: null,
-      total_amount_inr: totalUdhaar,
+      total_amount_inr: netUdhaar,
       items: [],
       transaction_type: 'QUERY',
       ignored_side_chatter: ignoredNoiseText,
@@ -210,9 +213,9 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
       tts_readback,
       query_answer: {
         title: 'दुकान की कुल स्थिति (Store Outstanding)',
-        mainMetric: `₹${totalUdhaar.toLocaleString('en-IN')}`,
-        metricLabel: 'कुल उधार बाकी',
-        details: `कुल जमा: ₹${totalJama.toLocaleString('en-IN')}`
+        mainMetric: `₹${netUdhaar.toLocaleString('en-IN')}`,
+        metricLabel: 'शुद्ध उधार बाकी',
+        details: `कुल उधार: ₹${grossStoreUdhaar.toLocaleString('en-IN')} | कुल जमा: ₹${totalJama.toLocaleString('en-IN')}`
       }
     };
   }

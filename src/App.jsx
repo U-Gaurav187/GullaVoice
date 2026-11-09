@@ -81,9 +81,10 @@ export default function App() {
   const effectiveGroqKey = settings.groqApiKey || import.meta.env.VITE_GROQ_API_KEY || '';
   const effectiveGeminiKey = settings.geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY || '';
 
-  // Aggregate stats
-  const totalUdhaar = customers.reduce((sum, c) => sum + (c.totalUdhaar || 0), 0);
+  // Aggregate stats (Authoritative net udhaar after deducting jama)
+  const grossUdhaar = customers.reduce((sum, c) => sum + (c.totalUdhaar || 0), 0);
   const totalJama = customers.reduce((sum, c) => sum + (c.totalJama || 0), 0);
+  const totalUdhaar = Math.max(0, grossUdhaar - totalJama); // Net remaining udhaar after subtracting jama
 
   /**
    * 1. Voice-to-Text via Wispr Flow API (Official Hackathon STT) or Groq Whisper AI,
@@ -604,21 +605,24 @@ export default function App() {
           details: `उधार: ₹${todayUdhaar.toLocaleString('en-IN')} | जमा: ₹${todayJama.toLocaleString('en-IN')}`
         };
       } else if (qIntent === 'CHECK_HIGHEST_UDHAAR') {
-        const sorted = [...customers].sort((a, b) => (b.totalUdhaar || 0) - (a.totalUdhaar || 0));
+        // Sort by authoritative NET remaining udhaar (gross - jama)
+        const sorted = [...customers].sort((a, b) => 
+          Math.max(0, (b.totalUdhaar || 0) - (b.totalJama || 0)) - Math.max(0, (a.totalUdhaar || 0) - (a.totalJama || 0))
+        );
         const topCust = sorted[0];
-        const topAmount = topCust ? (topCust.totalUdhaar || 0) : 0;
-        if (topCust && topAmount > 0) {
+        const topNetUdhaar = topCust ? Math.max(0, (topCust.totalUdhaar || 0) - (topCust.totalJama || 0)) : 0;
+        if (topCust && topNetUdhaar > 0) {
           parsedResult.customer_data = topCust;
           parsedResult.matched_customer_name = topCust.name;
-          parsedResult.total_amount_inr = topAmount;
-          parsedResult.tts_hindi_readback = `दुकान में सबसे ज्यादा उधार ${topCust.hindiName || topCust.name} के पास है, कुल ₹${topAmount.toLocaleString('en-IN')} बाकी है।`;
-          parsedResult.tts_readback = `The highest udhaar in the store is with ${topCust.name}, total ₹${topAmount.toLocaleString('en-IN')}.`;
+          parsedResult.total_amount_inr = topNetUdhaar;
+          parsedResult.tts_hindi_readback = `दुकान में सबसे ज्यादा उधार ${topCust.hindiName || topCust.name} के पास है, ₹${(topCust.totalJama || 0).toLocaleString('en-IN')} जमा काटकर कुल ₹${topNetUdhaar.toLocaleString('en-IN')} बाकी है।`;
+          parsedResult.tts_readback = `The highest net udhaar in the store is with ${topCust.name}, total ₹${topNetUdhaar.toLocaleString('en-IN')} remaining.`;
           parsedResult.query_answer = {
             title: 'सबसे ज्यादा उधार (Top Debtor)',
             customerName: topCust.name,
-            mainMetric: `₹${topAmount.toLocaleString('en-IN')}`,
-            metricLabel: 'कुल उधार बाकी',
-            details: `जमा: ₹${(topCust.totalJama || 0).toLocaleString('en-IN')}`
+            mainMetric: `₹${topNetUdhaar.toLocaleString('en-IN')}`,
+            metricLabel: 'शुद्ध उधार बाकी',
+            details: `कुल उधार: ₹${(topCust.totalUdhaar || 0).toLocaleString('en-IN')} | जमा: ₹${(topCust.totalJama || 0).toLocaleString('en-IN')}`
           };
         } else {
           parsedResult.total_amount_inr = 0;
@@ -633,16 +637,18 @@ export default function App() {
           };
         }
       } else if (qIntent === 'CHECK_TOTAL_STORE_BALANCE') {
-        const totalUdhaar = (customers || []).reduce((sum, c) => sum + (c.totalUdhaar || 0), 0);
-        const totalJama = (customers || []).reduce((sum, c) => sum + (c.totalJama || 0), 0);
-        parsedResult.total_amount_inr = totalUdhaar;
-        parsedResult.tts_hindi_readback = `दुकान में वर्तमान में कुल ₹${totalUdhaar.toLocaleString('en-IN')} उधार बाकी है और ₹${totalJama.toLocaleString('en-IN')} जमा है।`;
-        parsedResult.tts_readback = `Total store outstanding udhaar is ₹${totalUdhaar.toLocaleString('en-IN')}, and total jama is ₹${totalJama.toLocaleString('en-IN')}.`;
+        const grossStoreUdhaar = (customers || []).reduce((sum, c) => sum + (c.totalUdhaar || 0), 0);
+        const storeJama = (customers || []).reduce((sum, c) => sum + (c.totalJama || 0), 0);
+        const netStoreUdhaar = Math.max(0, grossStoreUdhaar - storeJama);
+
+        parsedResult.total_amount_inr = netStoreUdhaar;
+        parsedResult.tts_hindi_readback = `दुकान में ₹${storeJama.toLocaleString('en-IN')} जमा काटकर, अब कुल ₹${netStoreUdhaar.toLocaleString('en-IN')} उधार बाकी है।`;
+        parsedResult.tts_readback = `After deducting ₹${storeJama.toLocaleString('en-IN')} jama, total net store udhaar remaining is ₹${netStoreUdhaar.toLocaleString('en-IN')}.`;
         parsedResult.query_answer = {
           title: 'दुकान की कुल स्थिति (Store Outstanding)',
-          mainMetric: `₹${totalUdhaar.toLocaleString('en-IN')}`,
-          metricLabel: 'कुल उधार बाकी',
-          details: `कुल जमा: ₹${totalJama.toLocaleString('en-IN')}`
+          mainMetric: `₹${netStoreUdhaar.toLocaleString('en-IN')}`,
+          metricLabel: 'शुद्ध उधार बाकी',
+          details: `कुल उधार: ₹${grossStoreUdhaar.toLocaleString('en-IN')} | कुल जमा: ₹${storeJama.toLocaleString('en-IN')}`
         };
       }
 
@@ -895,6 +901,7 @@ export default function App() {
         transactions={transactions}
         customers={customers}
         totalUdhaar={totalUdhaar}
+        grossUdhaar={grossUdhaar}
         totalJama={totalJama}
       />
 

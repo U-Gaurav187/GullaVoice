@@ -53,9 +53,13 @@ OPERATIONAL KIRANA DISCOURSE & LEDGER RULES (CRITICAL):
    - When asked about today's sales (e.g. "Aaj kitni sale hui?", "Aaj kitna udhaar hua?"):
      * Set "intent": "CHECK_TODAY_SUMMARY"
    - When asked about highest debtor (e.g. "Sabse zyada udhaar kiske paas hai?"):
-     * Set "intent": "CHECK_HIGHEST_UDHAAR"
-   - When asked about store total (e.g. "Dukan me kul kitna udhaar hai?"):
-     * Set "intent": "CHECK_TOTAL_STORE_BALANCE"
+      * Set "intent": "CHECK_HIGHEST_UDHAAR"
+      * Rank customers by NET remaining balance (netBalance = totalUdhaar - totalJama), not gross!
+      * In "tts_hindi_readback", answer with the net outstanding amount: "दुकान में सबसे ज्यादा उधार [Customer] के पास है, ₹[jama] जमा काटकर कुल ₹[netBalance] बाकी है।"
+    - When asked about store total (e.g. "Dukan me kul kitna udhaar hai?"):
+      * Set "intent": "CHECK_TOTAL_STORE_BALANCE"
+      * Compute store net udhaar: netStoreUdhaar = grossUdhaar - storeJama
+      * In "tts_hindi_readback", answer clearly: "दुकान में कुल ₹[storeJama] जमा काटकर, अब शुद्ध ₹[netStoreUdhaar] उधार बाकी है।"
 
 5. RATE CARD VOICE UPDATES:
    - When the shopkeeper gives voice commands to update product prices or add new rates (e.g. "Rate card mein mooli ka daam ₹40 kilo, cheeni ka daam ₹60 kilo, aaloo ka daam ₹45 pao kar do", "रेट कार्ड में मूली 40 रुपये किलो, चीनी 60 रुपये किलो कर दो", "तेल का भाव 150 रुपये कर दो"):
