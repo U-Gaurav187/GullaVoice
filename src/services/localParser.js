@@ -171,21 +171,35 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
     };
   }
 
-  // 4. Customer Specific Balance Query (e.g. "Ramesh ka kitna udhaar baaki hai?", "रमेश भाई का खाता बताओ")
+  // 4. Customer Specific Balance Query (e.g. "Ramesh ka kitna udhaar baaki hai?", "रमेश भाई का खाता बताओ", "वैशाली खाते में कितना हुआ?")
   const isCustomerBalanceQuery = isQuery && (
     /(kitna\s+udhaar|udhaar\s+kitna|kitna\s+baaki|kitna\s+baki|kitna\s+balance|balance\s+kitna|khata\s+batao|khata\s+dikhao|hisab\s+batao)/i.test(normalizedText) ||
     /(कितना\s+उधार|उधार\s+कितना|कितना\s+बाकी|कितना\s+बैलेंस|बैलेंस\s+कितना|खाता\s+बताओ|खाता\s+दिखाओ|हिसाब\s+बताओ)/i.test(normalizedText) ||
-    /\b(khata|khate)\b.*(udhaar|baki|baaki)/i.test(normalizedText) ||
-    /(खाता|खाते).*(उधार|बाकी)/i.test(normalizedText)
+    /\b(khata|khate|khatam)\b.*(udhaar|baki|baaki|kitna|kitne|kitni|hua|hue|hai|batao|dikhao)/i.test(normalizedText) ||
+    /(खाता|खाते|खातं).*(उधार|बाकी|कितना|कितने|कितनी|हुआ|हुए|है|बताओ|दिखाओ)/i.test(normalizedText) ||
+    /(?:ka|ke|ki|का|के|की)\s*(?:kitna|kitne|kitni|कितना|कितने|कितनी)\s*(?:hua|hue|hai|baaki|baki|udhaar|हुआ|हुए|है|बाकी|उधार)/i.test(normalizedText)
   );
 
   if (isCustomerBalanceQuery) {
     let spokenCust = '';
-    const custMatch = normalizedText.match(/(?:(?:ha\s+suno|suno|arre?|are|bhaiya)\s+)?([\p{L}\p{M}\s]+?)\s+(?:ka|ke|ki|ko|का|के|की|को)\s+(?:kitna|khata|khate|udhaar|udhar|balance|baaki|baki|hisab|hisaab)/iu);
-    if (custMatch) {
-      spokenCust = custMatch[1].trim();
+    let cleanedQ = normalizedText.trim().replace(/[।.,!?]+$/g, '');
+    cleanedQ = cleanedQ.replace(/^(?:कि|जरा|अरे|सुनो|हां\s+सुनो|भैया|चेक\s+करो|बताओ|देखना|ki|zara|arre?|are|suno|ha\s+suno|bhaiya|check\s+karo|batao|dekhna)\s+/iu, '');
+
+    const m1 = cleanedQ.match(/^(.+?)\s+(?:(?:ke|ka|ki|ko|के|का|की|को)\s+)?(?:khate\s+me(?:in)?|khata\s+me(?:in)?|khate|khata|khatam|खाते\s+में|खाता\s+में|खाते|खाता|खातं)\s+(?:kitna|kitne|kitni|udhaar|udhar|baaki|baki|hisab|hisaab|balance|hua|hue|hai|batao|dikhao|कितना|कितने|कितनी|उधार|बाकी|हिसाब|बैलेंस|हुआ|हुए|है|बताओ|दिखाओ)/iu);
+    if (m1) {
+      spokenCust = m1[1].trim();
     } else {
-      spokenCust = normalizedText.split(/\s+/).slice(0, 2).join(' ');
+      const m2 = cleanedQ.match(/^(.+?)\s+(?:ke|ka|ki|ko|के|का|की|को)\s+(?:kitna|kitne|kitni|udhaar|udhar|baaki|baki|hisab|hisaab|balance|hua|hue|hai|batao|dikhao|कितना|कितने|कितनी|उधार|बाकी|हिसाब|बैलेंस|हुआ|हुए|है|बताओ|दिखाओ)/iu);
+      if (m2) {
+        spokenCust = m2[1].trim();
+      } else {
+        const custMatch = cleanedQ.match(/(?:(?:ha\s+suno|suno|arre?|are|bhaiya)\s+)?([\p{L}\p{M}\s]+?)\s+(?:ka|ke|ki|ko|का|के|की|को)\s+(?:kitna|khata|khate|udhaar|udhar|balance|baaki|baki|hisab|hisaab)/iu);
+        if (custMatch) {
+          spokenCust = custMatch[1].trim();
+        } else {
+          spokenCust = cleanedQ.split(/\s+/).slice(0, 2).join(' ');
+        }
+      }
     }
 
     const phoneticMatch = matchCustomerPhonetically(spokenCust, customers, 0.60);

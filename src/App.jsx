@@ -22,7 +22,6 @@ import SettingsModal from './components/SettingsModal.jsx';
 import LanguageSelectModal from './components/LanguageSelectModal.jsx';
 import PurchaseDetailModal from './components/PurchaseDetailModal.jsx';
 import VoiceAssistantAnswerCard from './components/VoiceAssistantAnswerCard.jsx';
-import AudioPresetBar from './components/AudioPresetBar.jsx';
 
 import { storage } from './utils/storage.js';
 import { speechTTS } from './utils/speechTTS.js';
@@ -311,21 +310,190 @@ export default function App() {
       'CHECK_TODAY_SUMMARY',
       'CHECK_HIGHEST_UDHAAR',
       'CHECK_TOTAL_STORE_BALANCE'
-    ].includes(parsedResult.intent);
+    ].includes(parsedResult.intent) || (
+      (!parsedResult.items || parsedResult.items.length === 0) &&
+      (/\b(kitna|kitni|kitne|batao|dikhao|kiske|kiska|kisko|check|hisab|hisaab|balance|sale|bikri|dhandha)\b|कितना|कितनी|कितने|बताओ|दिखाओ|किसका|किसके|किसको|चेक|हिसाब|बैलेंस|सेल|बिक्री|धंधा/i.test(transcriptText))
+    );
 
     if (isQueryIntent) {
       setStagedDraft(null);
-      // Hydrate customer data if available
-      let custData = parsedResult.customer_data;
-      if (!custData && parsedResult.matched_customer_id) {
-        custData = customers.find(c => c.id === parsedResult.matched_customer_id);
-      } else if (!custData && parsedResult.matched_customer_name) {
-        custData = customers.find(c => c.name.toLowerCase() === parsedResult.matched_customer_name.toLowerCase());
+
+      // Detect specific query type if LLM returned generic query or was mistaken
+      let qIntent = parsedResult.intent;
+      const normText = transcriptText.toLowerCase();
+
+      if (/(sabse\s+zyada|sabse\s+bada|top|highest)/i.test(normText) || /(सबसे\s+ज्यादा|सबसे\s+बड़ा|टॉप)/i.test(normText)) {
+        qIntent = 'CHECK_HIGHEST_UDHAAR';
+      } else if (/(aaj|today|आज)/i.test(normText) && /(sale|bikri|dhandha|hisab|उधार|जमा|सेल|बिक्री)/i.test(normText) && !/(khate|khata|के खाते|का खाता)/i.test(normText)) {
+        qIntent = 'CHECK_TODAY_SUMMARY';
+      } else if (/(dukan|store|total|kul|दुकान|स्टोर|कुल)/i.test(normText) && /(kitna|udhaar|balance|उधार|बाकी)/i.test(normText) && !/(khate|khata|के खाते|का खाता)/i.test(normText)) {
+        qIntent = 'CHECK_TOTAL_STORE_BALANCE';
+      } else {
+        qIntent = 'CHECK_BALANCE';
+      }
+
+      parsedResult.intent = qIntent;
+
+      if (qIntent === 'CHECK_BALANCE') {
+        // Extract customer name candidates
+        let candidateName = parsedResult.matched_customer_name || parsedResult.customer_spoken || '';
+        if (!candidateName) {
+          let cleanedQ = transcriptText.trim().replace(/[।.,!?]+$/g, '');
+          cleanedQ = cleanedQ.replace(/^(?:कि|जरा|अरे|सुनो|हां\s+सुनो|भैया|चेक\s+करो|बताओ|देखना|ki|zara|arre?|are|suno|ha\s+suno|bhaiya|check\s+karo|batao|dekhna)\s+/iu, '');
+          const m1 = cleanedQ.match(/^(.+?)\s+(?:(?:ke|ka|ki|ko|के|का|की|को)\s+)?(?:khate\s+me(?:in)?|khata\s+me(?:in)?|khate|khata|khatam|खाते\s+में|खाता\s+में|खाते|खाता|खातं)\s+/iu);
+          if (m1) candidateName = m1[1].trim();
+          else {
+            const m2 = cleanedQ.match(/^(.+?)\s+(?:ke|ka|ki|ko|के|का|की|को)\s+/iu);
+            if (m2) candidateName = m2[1].trim();
+          }
+        }
+
+        // 1. Authoritative lookup from persistent customer database using phonetic matcher
+        const pMatch = matchCustomerPhonetically(candidateName || transcriptText, customers, 0.50);
+
+        // 2. Check if there was an unsaved staged draft for this customer
+        let draftMatch = null;
+        if (!pMatch.isMatch && stagedDraft && (stagedDraft.matched_customer_name || stagedDraft.customer_spoken)) {
+          const draftCustomerName = stagedDraft.matched_customer_name || stagedDraft.customer_spoken;
+          const dm = matchCustomerPhonetically(candidateName || transcriptText, [{
+            id: 'DRAFT',
+            name: draftCustomerName,
+            hindiName: draftCustomerName,
+            totalUdhaar: stagedDraft.transaction_type === 'UDHAAR' ? stagedDraft.total_amount_inr : 0,
+            totalJama: stagedDraft.transaction_type === 'JAMA' ? stagedDraft.total_amount_inr : 0
+          }], 0.50);
+          if (dm.isMatch) draftMatch = dm;
+        }
+
+        if (pMatch.isMatch && pMatch.customer) {
+          const targetCust = pMatch.customer;
+          const udhaar = targetCust.totalUdhaar || 0;
+          const jama = targetCust.totalJama || 0;
+          const net = Math.max(0, udhaar - jama);
+          const cName = targetCust.hindiName || targetCust.name;
+
+          parsedResult.total_amount_inr = udhaar;
+          parsedResult.customer_data = targetCust;
+          parsedResult.matched_customer_name = targetCust.name;
+          parsedResult.matched_customer_id = targetCust.id;
+
+          let hindiText = '';
+          let engText = '';
+
+          if (udhaar > 0 && jama > 0) {
+            hindiText = `${cName} के खाते में कुल ₹${udhaar.toLocaleString('en-IN')} उधार है और ₹${jama.toLocaleString('en-IN')} जमा है। कुल बाकी ₹${net.toLocaleString('en-IN')} है।`;
+            engText = `${targetCust.name} has ₹${udhaar.toLocaleString('en-IN')} udhaar and ₹${jama.toLocaleString('en-IN')} jama. Net remaining balance is ₹${net.toLocaleString('en-IN')}.`;
+          } else if (udhaar > 0) {
+            hindiText = `${cName} के खाते में कुल ₹${udhaar.toLocaleString('en-IN')} उधार बाकी है।`;
+            engText = `${targetCust.name} has total ₹${udhaar.toLocaleString('en-IN')} pending udhaar.`;
+          } else {
+            hindiText = `${cName} का कोई उधार बाकी नहीं है, खाता पूरा चुकता है।`;
+            engText = `${targetCust.name} has zero pending udhaar, account is fully settled.`;
+          }
+
+          parsedResult.tts_hindi_readback = hindiText;
+          parsedResult.tts_readback = engText;
+          parsedResult.query_answer = {
+            title: `${cName} का खाता (Balance)`,
+            customerName: targetCust.name,
+            hindiName: targetCust.hindiName,
+            mainMetric: `₹${udhaar.toLocaleString('en-IN')}`,
+            metricLabel: 'कुल उधार बाकी',
+            details: `जमा: ₹${jama.toLocaleString('en-IN')} | नेट बकाया: ₹${net.toLocaleString('en-IN')}`
+          };
+        } else if (draftMatch && draftMatch.isMatch) {
+          const draftAmt = Number(stagedDraft.total_amount_inr) || 0;
+          parsedResult.total_amount_inr = draftAmt;
+          parsedResult.matched_customer_name = draftMatch.matchedName;
+          parsedResult.customer_data = null;
+          parsedResult.tts_hindi_readback = `${draftMatch.matchedName} के खाते में ₹${draftAmt.toLocaleString('en-IN')} का उधार अभी ड्राफ्ट में है, जिसे आपने अभी तक सेव नहीं किया है। कृपया पहले नीचे 'पुष्टि करें' बटन दबाएं।`;
+          parsedResult.tts_readback = `${draftMatch.matchedName} has ₹${draftAmt.toLocaleString('en-IN')} in an unconfirmed draft. Please tap Confirm & Save on screen first.`;
+          parsedResult.query_answer = {
+            title: 'ड्राफ्ट प्रविष्टि (Unsaved Draft)',
+            customerName: draftMatch.matchedName,
+            mainMetric: `₹${draftAmt.toLocaleString('en-IN')}`,
+            metricLabel: 'ड्राफ्ट उधार (अपुष्ट)',
+            details: 'यह प्रविष्टि अभी तक सेव नहीं हुई है। नीचे पुष्टि करें दबाएं।'
+          };
+        } else {
+          // Unrecognized customer
+          const dispName = candidateName || 'ग्राहक';
+          parsedResult.total_amount_inr = 0;
+          parsedResult.customer_data = null;
+          parsedResult.tts_hindi_readback = `ग्राहक '${dispName}' का कोई खाता नहीं मिला। क्या नया खाता खोलना चाहते हैं?`;
+          parsedResult.tts_readback = `No customer record found for '${dispName}'.`;
+          parsedResult.query_answer = {
+            title: 'ग्राहक नहीं मिला (No Record)',
+            customerName: dispName,
+            mainMetric: 'रिकॉर्ड नहीं मिला',
+            metricLabel: 'खाता स्थिति',
+            details: 'कृपया ग्राहक का नाम सही से बोलें या नया खाता जोड़ें'
+          };
+        }
+      } else if (qIntent === 'CHECK_TODAY_SUMMARY') {
+        const todayStr = new Date().toDateString();
+        const todayTxns = (transactions || []).filter(t => {
+          const d = t.timestamp ? new Date(t.timestamp) : (t.date ? new Date(t.date) : null);
+          return d && d.toDateString() === todayStr;
+        });
+        const todayUdhaar = todayTxns.filter(t => t.type === 'UDHAAR' || t.transactionType === 'UDHAAR').reduce((sum, t) => sum + (t.amount || t.totalAmount || 0), 0);
+        const todayJama = todayTxns.filter(t => t.type === 'JAMA' || t.transactionType === 'JAMA').reduce((sum, t) => sum + (t.amount || t.totalAmount || 0), 0);
+        const todayCount = todayTxns.length;
+
+        parsedResult.total_amount_inr = todayUdhaar + todayJama;
+        parsedResult.tts_hindi_readback = `आज दुकान में कुल ${todayCount} लेनदेन हुए: ₹${todayUdhaar.toLocaleString('en-IN')} उधार और ₹${todayJama.toLocaleString('en-IN')} रुपये जमा दर्ज किए गए।`;
+        parsedResult.tts_readback = `Today: ${todayCount} transactions. ₹${todayUdhaar.toLocaleString('en-IN')} udhaar and ₹${todayJama.toLocaleString('en-IN')} payment received.`;
+        parsedResult.query_answer = {
+          title: "आज का खाता व हिसाब (Today's Summary)",
+          mainMetric: `₹${(todayUdhaar + todayJama).toLocaleString('en-IN')}`,
+          metricLabel: `कुल लेनदेन: ${todayCount}`,
+          details: `उधार: ₹${todayUdhaar.toLocaleString('en-IN')} | जमा: ₹${todayJama.toLocaleString('en-IN')}`
+        };
+      } else if (qIntent === 'CHECK_HIGHEST_UDHAAR') {
+        const sorted = [...customers].sort((a, b) => (b.totalUdhaar || 0) - (a.totalUdhaar || 0));
+        const topCust = sorted[0];
+        const topAmount = topCust ? (topCust.totalUdhaar || 0) : 0;
+        if (topCust && topAmount > 0) {
+          parsedResult.customer_data = topCust;
+          parsedResult.matched_customer_name = topCust.name;
+          parsedResult.total_amount_inr = topAmount;
+          parsedResult.tts_hindi_readback = `दुकान में सबसे ज्यादा उधार ${topCust.hindiName || topCust.name} के पास है, कुल ₹${topAmount.toLocaleString('en-IN')} बाकी है।`;
+          parsedResult.tts_readback = `The highest udhaar in the store is with ${topCust.name}, total ₹${topAmount.toLocaleString('en-IN')}.`;
+          parsedResult.query_answer = {
+            title: 'सबसे ज्यादा उधार (Top Debtor)',
+            customerName: topCust.name,
+            mainMetric: `₹${topAmount.toLocaleString('en-IN')}`,
+            metricLabel: 'कुल उधार बाकी',
+            details: `जमा: ₹${(topCust.totalJama || 0).toLocaleString('en-IN')}`
+          };
+        } else {
+          parsedResult.total_amount_inr = 0;
+          parsedResult.tts_hindi_readback = 'दुकान में किसी भी ग्राहक का उधार बाकी नहीं है, सभी खाते चुकता हैं।';
+          parsedResult.tts_readback = 'No outstanding udhaar with any customer in the store.';
+          parsedResult.query_answer = {
+            title: 'सबसे ज्यादा उधार (Top Debtor)',
+            customerName: 'कोई नहीं',
+            mainMetric: '₹0',
+            metricLabel: 'खाता स्थिति',
+            details: 'सभी खाते चुकता हैं'
+          };
+        }
+      } else if (qIntent === 'CHECK_TOTAL_STORE_BALANCE') {
+        const totalUdhaar = (customers || []).reduce((sum, c) => sum + (c.totalUdhaar || 0), 0);
+        const totalJama = (customers || []).reduce((sum, c) => sum + (c.totalJama || 0), 0);
+        parsedResult.total_amount_inr = totalUdhaar;
+        parsedResult.tts_hindi_readback = `दुकान में वर्तमान में कुल ₹${totalUdhaar.toLocaleString('en-IN')} उधार बाकी है और ₹${totalJama.toLocaleString('en-IN')} जमा है।`;
+        parsedResult.tts_readback = `Total store outstanding udhaar is ₹${totalUdhaar.toLocaleString('en-IN')}, and total jama is ₹${totalJama.toLocaleString('en-IN')}.`;
+        parsedResult.query_answer = {
+          title: 'दुकान की कुल स्थिति (Store Outstanding)',
+          mainMetric: `₹${totalUdhaar.toLocaleString('en-IN')}`,
+          metricLabel: 'कुल उधार बाकी',
+          details: `कुल जमा: ₹${totalJama.toLocaleString('en-IN')}`
+        };
       }
 
       setVoiceQueryResult({
         ...parsedResult,
-        customer_data: custData,
         rawTranscript: transcriptText
       });
       setFilteredNoise(parsedResult.ignored_side_chatter || '');
@@ -622,11 +790,6 @@ export default function App() {
                   language={currentLanguage}
                   hasApiKey={Boolean(effectiveGroqKey)}
                   onOpenSettings={() => setIsSettingsOpen(true)}
-                />
-
-                <AudioPresetBar
-                  onSelectPreset={(preset) => handleProcessTranscript(preset.spokenText)}
-                  isProcessing={isProcessing}
                 />
               </>
             )}

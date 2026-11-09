@@ -52,24 +52,49 @@ export function calculateSimilarity(str1 = '', str2 = '') {
 }
 
 /**
- * Strips common Indian honorifics and titles to isolate root names in both English and Hindi
+ * Strips common Indian honorifics, titles, and conversational query openers to isolate root names in both English and Hindi
  */
 export function stripHonorifics(name = '') {
   if (!name) return '';
   return name
     .toLowerCase()
-    .replace(/\b(bhai|bhabhi|ji|bhaiya|babu|seth|uncle|devi|aunty|didi|sahab|saab|auto|auto wala|tailor|ke|ka|ko|ket)\b/gi, ' ')
-    .replace(/(?:^|\s+)(भाई|भाभी|भैया|बाबू|सेठ|दीदी|साहब|टेलर|ऑटो|के|का|को|की|खाते|में|केट|जी)(?=\s+|$)/gi, ' ')
+    .replace(/^(?:कि|जरा|अरे|सुनो|हां\s+सुनो|भैया|चेक\s+करो|बताओ|देखना|ki|zara|arre?|are|suno|ha\s+suno|bhaiya|check\s+karo|batao|dekhna)\s+/iu, '')
+    .replace(/\b(bhai|bhabhi|ji|bhaiya|babu|seth|uncle|devi|aunty|didi|sahab|saab|auto|auto wala|tailor|ke|ka|ko|ki|ket)\b/gi, ' ')
+    .replace(/(?:^|\s+)(भाई|भाभी|भैया|बाबू|सेठ|दीदी|साहब|टेलर|ऑटो|के|का|को|की|खाते|में|केट|जी|कि)(?=\s+|$)/gi, ' ')
     .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
 /**
+ * Maps Devanagari script to Hinglish phonetic phonemes
+ * Handles regional dialect interchangeability:
+ * - व <-> ब (Vaishali <-> Baisali)
+ * - श <-> स <-> ष (Ramesh <-> Rames, Vaishali <-> Vaisali)
+ * - च <-> छ, क <-> ख, ग <-> घ, ज <-> झ
+ */
+export function devanagariToPhonetic(str = '') {
+  const charMap = {
+    'अ':'a','आ':'a','इ':'i','ई':'i','उ':'u','ऊ':'u','ए':'e','ऐ':'e','ओ':'o','औ':'o',
+    'ा':'a','ि':'i','ी':'i','ु':'u','ू':'u','े':'e','ै':'e','ो':'o','ौ':'o',
+    'ं':'n','ँ':'n','्':'',
+    'क':'k','ख':'k','ग':'g','घ':'g',
+    'च':'c','छ':'c','ज':'j','झ':'j',
+    'ट':'t','ठ':'t','ड':'d','ढ':'d','ण':'n',
+    'त':'t','थ':'t','द':'d','ध':'d','न':'n',
+    'प':'p','फ':'f','ब':'v','भ':'v','म':'m',
+    'य':'y','र':'r','ल':'l','व':'v',
+    'श':'s','ष':'s','स':'s','ह':'h',
+    'ड़':'r','ढ़':'d','फ़':'f','ज़':'j'
+  };
+  return str.split('').map(ch => charMap[ch] !== undefined ? charMap[ch] : ch).join('');
+}
+
+/**
  * Hinglish Phonetic Code Transformer
  * Normalizes common regional Indian speech variations:
  * - Sh vs S (Bhojpuri / Marwari / Hindi)
- * - V vs W
+ * - V vs W vs B (Vaishali / Baisali)
  * - Ph vs F
  * - Z vs J
  * - Aspirated consonants: Bh -> B, Dh -> D, Th -> T, Kh -> K, Gh -> G, Chh -> C
@@ -78,6 +103,11 @@ export function stripHonorifics(name = '') {
 export function toHinglishPhoneticKey(str = '') {
   if (!str) return '';
   let s = stripHonorifics(str);
+
+  // If contains Devanagari characters, map to phonetic Latin
+  if (/[\u0900-\u097F]/.test(s)) {
+    s = devanagariToPhonetic(s);
+  }
 
   // Common Hindi Devanagari transliteration simplifications
   s = s

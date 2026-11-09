@@ -36,10 +36,11 @@ OPERATIONAL KIRANA DISCOURSE & LEDGER RULES (CRITICAL):
    - If unit price or total amount is not explicitly stated in spoken command, compute total_amount_inr by multiplying quantity * rateCard.unitPrice!
 
 4. TWO-WAY CONVERSATIONAL LEDGER QUERIES (REVERSE VOICE KHATA):
-   - When the shopkeeper asks about a customer's balance (e.g. "Ramesh ka kitna udhaar baaki hai?", "Ramesh bhai ka khata batao", "kitna baaki hai"):
+   - When the shopkeeper asks about a customer's balance (e.g. "वैशाली खाते में कितना हुआ?", "Ramesh ka kitna udhaar baaki hai?", "कि बैसाली के खाते में कितने का उधार है", "Ramesh bhai ka khata batao"):
      * Set "intent": "CHECK_BALANCE"
-     * Match customer name from EXISTING CUSTOMERS IN STORE DATABASE
-     * In "tts_hindi_readback", answer clearly (e.g. "<Customer> के खाते में कुल ₹... उधार बाकी है।")
+     * Match customer name from EXISTING CUSTOMERS IN STORE DATABASE (match regional accents & phonetic variations: "बैसाली" / "वैसाली" -> "वैशाली" / "Vaishali")
+     * Find their totalUdhaar in the customer record. Set "total_amount_inr": <customer's totalUdhaar>
+     * In "tts_hindi_readback", answer clearly with their true balance (e.g. "<Customer> के खाते में कुल ₹... उधार बाकी है।"). NEVER report 0 rupees if totalUdhaar > 0!
    - When asked about today's sales (e.g. "Aaj kitni sale hui?", "Aaj kitna udhaar hua?"):
      * Set "intent": "CHECK_TODAY_SUMMARY"
    - When asked about highest debtor (e.g. "Sabse zyada udhaar kiske paas hai?"):
@@ -48,7 +49,7 @@ OPERATIONAL KIRANA DISCOURSE & LEDGER RULES (CRITICAL):
      * Set "intent": "CHECK_TOTAL_STORE_BALANCE"
 
 5. DUAL-LANGUAGE VOICE READBACK:
-   - "tts_hindi_readback": Clear, natural Devanagari Hindi readback confirming the customer name, items, and total amount, or speaking the direct query answer.
+   - "tts_hindi_readback": Clear, natural Devanagari Hindi readback confirming the customer name, items, and total amount, or speaking the direct query answer with exact ledger rupees.
    - "tts_readback": English/Hinglish readback.
 
 Respond strictly in valid JSON conforming to this schema:
@@ -80,10 +81,10 @@ Respond strictly in valid JSON conforming to this schema:
 }`;
 
 const CANDIDATE_CHAT_MODELS = [
+  'openai/gpt-oss-20b',
+  'openai/gpt-oss-120b',
   'llama-3.3-70b-versatile',
   'llama-3.1-8b-instant',
-  'openai/gpt-oss-120b',
-  'openai/gpt-oss-20b',
   'mixtral-8x7b-32768',
   'qwen/qwen3.8-27b'
 ];
@@ -128,6 +129,9 @@ ${JSON.stringify(customers.map(c => ({
   name: c.name,
   hindiName: c.hindiName,
   upNativeName: c.upNativeName,
+  totalUdhaar: c.totalUdhaar || 0,
+  totalJama: c.totalJama || 0,
+  netBalance: (c.totalUdhaar || 0) - (c.totalJama || 0),
   aliases: c.aliases
 })), null, 2)}
 
