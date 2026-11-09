@@ -197,6 +197,24 @@ export default function App() {
    * Executes AI LLM parser (Gemini 3.5 Flash or Groq with local fallback)
    */
   const executeAIParser = async (transcriptText) => {
+    // 0. PURE IN-APP LOCAL CHECK: Handle PDF generation 100% locally inside the app (NO AI API keys or network calls used)
+    const localPdfCheck = parseKiranaVoiceLocally(transcriptText, customers, rateCard);
+    if (localPdfCheck && localPdfCheck.intent === 'GENERATE_PDF') {
+      console.log('📄 PDF requested: generating in-app 100% locally from device storage (ZERO AI API keys used)');
+      setIsPdfModalOpen(true);
+      setVoiceQueryResult({
+        ...localPdfCheck,
+        rawTranscript: transcriptText
+      });
+      if (settings.autoReadback) {
+        speechTTS.speak(
+          currentLanguage === 'hi' ? localPdfCheck.tts_hindi_readback : localPdfCheck.tts_readback,
+          currentLanguage
+        );
+      }
+      return;
+    }
+
     let parsedResult = null;
 
     // 1. High-Speed Groq Engine (Llama / GPT-OSS 120B or secure serverless proxy)
