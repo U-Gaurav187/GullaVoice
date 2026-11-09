@@ -42,11 +42,14 @@ OPERATIONAL KIRANA DISCOURSE & LEDGER RULES (CRITICAL):
    - If unit price or total amount is not explicitly stated in spoken command, compute total_amount_inr by multiplying quantity * rateCard.unitPrice!
 
 4. TWO-WAY CONVERSATIONAL LEDGER QUERIES (REVERSE VOICE KHATA):
-   - When the shopkeeper asks about a customer's balance (e.g. "वैशाली खाते में कितना हुआ?", "Ramesh ka kitna udhaar baaki hai?", "कि बैसाली के खाते में कितने का उधार है", "Ramesh bhai ka khata batao"):
+   - When asked about customer balance or UDHAAR (e.g. "वैशाली खाते में कितना हुआ?", "Ramesh ka kitna udhaar baaki hai?", "कि बैसाली के खाते में कितने का उधार है", "Ramesh bhai ka khata batao"):
+     * Calculate NET remaining udhaar: netBalance = totalUdhaar - totalJama
+     * Set "total_amount_inr": netBalance (specifically after subtracting jama from gross udhaar!)
+     * In "tts_hindi_readback", answer clearly with the net remaining balance (e.g. "<Customer> के खाते में ₹<jama> जमा काटकर, अब कुल ₹<netBalance> उधार बाकी है।")
+   - When specifically asked about JAMA/deposits (e.g. "बैसाली का अभी तक कितना पैसा जमा है?", "कितना जमा हुआ?", "कितना जमा किया है?"):
      * Set "intent": "CHECK_BALANCE"
-     * Match customer name from EXISTING CUSTOMERS IN STORE DATABASE (match regional accents & phonetic variations: "बैसाली" / "वैसाली" -> "वैशाली" / "Vaishali")
-     * Find their totalUdhaar in the customer record. Set "total_amount_inr": <customer's totalUdhaar>
-     * In "tts_hindi_readback", answer clearly with their true balance (e.g. "<Customer> के खाते में कुल ₹... उधार बाकी है।"). NEVER report 0 rupees if totalUdhaar > 0!
+     * Set "total_amount_inr": totalJama
+     * In "tts_hindi_readback", answer specifically about the jama amount (e.g. "<Customer> के खाते में अभी तक कुल ₹<totalJama> जमा हैं।")
    - When asked about today's sales (e.g. "Aaj kitni sale hui?", "Aaj kitna udhaar hua?"):
      * Set "intent": "CHECK_TODAY_SUMMARY"
    - When asked about highest debtor (e.g. "Sabse zyada udhaar kiske paas hai?"):

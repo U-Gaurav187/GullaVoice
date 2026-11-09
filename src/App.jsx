@@ -501,7 +501,8 @@ export default function App() {
           const net = Math.max(0, udhaar - jama);
           const cName = targetCust.hindiName || targetCust.name;
 
-          parsedResult.total_amount_inr = udhaar;
+          const isJamaQuery = /(paisa\s+jama|paise\s+jama|kitna\s+jama|jama\s+kitna|पैसा\s+जमा|पैसे\s+जमा|कितना\s+जमा|जमा\s+कितना|जमा\s+है|जमा\s+किए|जमा\s+किया|जमा\s+हुआ)/i.test(normText);
+
           parsedResult.customer_data = targetCust;
           parsedResult.matched_customer_name = targetCust.name;
           parsedResult.matched_customer_id = targetCust.id;
@@ -509,27 +510,51 @@ export default function App() {
           let hindiText = '';
           let engText = '';
 
-          if (udhaar > 0 && jama > 0) {
-            hindiText = `${cName} के खाते में कुल ₹${udhaar.toLocaleString('en-IN')} उधार है और ₹${jama.toLocaleString('en-IN')} जमा है। कुल बाकी ₹${net.toLocaleString('en-IN')} है।`;
-            engText = `${targetCust.name} has ₹${udhaar.toLocaleString('en-IN')} udhaar and ₹${jama.toLocaleString('en-IN')} jama. Net remaining balance is ₹${net.toLocaleString('en-IN')}.`;
-          } else if (udhaar > 0) {
-            hindiText = `${cName} के खाते में कुल ₹${udhaar.toLocaleString('en-IN')} उधार बाकी है।`;
-            engText = `${targetCust.name} has total ₹${udhaar.toLocaleString('en-IN')} pending udhaar.`;
+          if (isJamaQuery) {
+            // Specific inquiry for JAMA (Deposited money)
+            parsedResult.total_amount_inr = jama;
+            if (jama > 0) {
+              hindiText = `${cName} के खाते में अभी तक कुल ₹${jama.toLocaleString('en-IN')} जमा हैं${net > 0 ? ` (और ₹${net.toLocaleString('en-IN')} उधार बाकी है)` : ''}।`;
+              engText = `${targetCust.name} has total ₹${jama.toLocaleString('en-IN')} deposited${net > 0 ? ` (and ₹${net.toLocaleString('en-IN')} net udhaar remaining)` : ''}.`;
+            } else {
+              hindiText = `${cName} के खाते में अभी तक कोई पैसा जमा नहीं है${udhaar > 0 ? ` (कुल ₹${udhaar.toLocaleString('en-IN')} उधार बाकी है)` : ''}।`;
+              engText = `${targetCust.name} has zero deposits so far${udhaar > 0 ? ` (total ₹${udhaar.toLocaleString('en-IN')} udhaar)` : ''}.`;
+            }
+
+            parsedResult.query_answer = {
+              title: `${cName} का जमा विवरण (Deposits)`,
+              customerName: targetCust.name,
+              hindiName: targetCust.hindiName,
+              mainMetric: `₹${jama.toLocaleString('en-IN')}`,
+              metricLabel: 'कुल जमा राशि (Total Jama)',
+              details: `कुल खरीद: ₹${udhaar.toLocaleString('en-IN')} | शुद्ध बकाया: ₹${net.toLocaleString('en-IN')}`
+            };
           } else {
-            hindiText = `${cName} का कोई उधार बाकी नहीं है, खाता पूरा चुकता है।`;
-            engText = `${targetCust.name} has zero pending udhaar, account is fully settled.`;
+            // Specifically UDHAAR: Subtracted from jama (Net remaining balance)
+            parsedResult.total_amount_inr = net;
+            if (net > 0 && jama > 0) {
+              hindiText = `${cName} के खाते में ₹${jama.toLocaleString('en-IN')} जमा काटकर, अब कुल ₹${net.toLocaleString('en-IN')} उधार बाकी है।`;
+              engText = `${targetCust.name} has ₹${net.toLocaleString('en-IN')} net udhaar remaining (after deducting ₹${jama.toLocaleString('en-IN')} jama).`;
+            } else if (net > 0) {
+              hindiText = `${cName} के खाते में कुल ₹${net.toLocaleString('en-IN')} उधार बाकी है।`;
+              engText = `${targetCust.name} has total ₹${net.toLocaleString('en-IN')} pending udhaar.`;
+            } else {
+              hindiText = `${cName} का कोई उधार बाकी नहीं है, खाता पूरा चुकता है${jama > 0 ? ` (₹${jama.toLocaleString('en-IN')} जमा दर्ज है)` : ''}।`;
+              engText = `${targetCust.name} has zero pending udhaar, account is fully settled${jama > 0 ? ` (₹${jama.toLocaleString('en-IN')} jama recorded)` : ''}.`;
+            }
+
+            parsedResult.query_answer = {
+              title: `${cName} का उधार खाता (Udhaar Balance)`,
+              customerName: targetCust.name,
+              hindiName: targetCust.hindiName,
+              mainMetric: `₹${net.toLocaleString('en-IN')}`,
+              metricLabel: 'कुल उधार बाकी (Net Balance)',
+              details: `कुल खरीद: ₹${udhaar.toLocaleString('en-IN')} | कुल जमा: ₹${jama.toLocaleString('en-IN')}`
+            };
           }
 
           parsedResult.tts_hindi_readback = hindiText;
           parsedResult.tts_readback = engText;
-          parsedResult.query_answer = {
-            title: `${cName} का खाता (Balance)`,
-            customerName: targetCust.name,
-            hindiName: targetCust.hindiName,
-            mainMetric: `₹${udhaar.toLocaleString('en-IN')}`,
-            metricLabel: 'कुल उधार बाकी',
-            details: `जमा: ₹${jama.toLocaleString('en-IN')} | नेट बकाया: ₹${net.toLocaleString('en-IN')}`
-          };
         } else if (draftMatch && draftMatch.isMatch) {
           const draftAmt = Number(stagedDraft.total_amount_inr) || 0;
           parsedResult.total_amount_inr = draftAmt;

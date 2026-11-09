@@ -217,13 +217,14 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
     };
   }
 
-  // 4. Customer Specific Balance Query (e.g. "Ramesh ka kitna udhaar baaki hai?", "रमेश भाई का खाता बताओ", "वैशाली खाते में कितना हुआ?")
+  // 4. Customer Specific Balance Query (e.g. "Ramesh ka kitna udhaar baaki hai?", "रमेश भाई का खाता बताओ", "वैशाली खाते में कितना हुआ?", "बैसाली का कितना पैसा जमा है?")
   const isCustomerBalanceQuery = isQuery && (
     /(kitna\s+udhaar|udhaar\s+kitna|kitna\s+baaki|kitna\s+baki|kitna\s+balance|balance\s+kitna|khata\s+batao|khata\s+dikhao|hisab\s+batao)/i.test(normalizedText) ||
     /(कितना\s+उधार|उधार\s+कितना|कितना\s+बाकी|कितना\s+बैलेंस|बैलेंस\s+कितना|खाता\s+बताओ|खाता\s+दिखाओ|हिसाब\s+बताओ)/i.test(normalizedText) ||
     /\b(khata|khate|khatam)\b.*(udhaar|baki|baaki|kitna|kitne|kitni|hua|hue|hai|batao|dikhao)/i.test(normalizedText) ||
     /(खाता|खाते|खातं).*(उधार|बाकी|कितना|कितने|कितनी|हुआ|हुए|है|बताओ|दिखाओ)/i.test(normalizedText) ||
-    /(?:ka|ke|ki|का|के|की)\s*(?:kitna|kitne|kitni|कितना|कितने|कितनी)\s*(?:hua|hue|hai|baaki|baki|udhaar|हुआ|हुए|है|बाकी|उधार)/i.test(normalizedText)
+    /(paisa\s+jama|paise\s+jama|kitna\s+jama|jama\s+kitna|पैसा\s+जमा|पैसे\s+जमा|कितना\s+जमा|जमा\s+कितना|जमा\s+है|जमा\s+किए|जमा\s+किया)/i.test(normalizedText) ||
+    /(?:ka|ke|ki|का|के|की)\s*(?:kitna|kitne|kitni|कितना|कितने|कितनी)\s*(?:hua|hue|hai|baaki|baki|udhaar|jama|पैसा\s+जमा|हुआ|हुए|है|बाकी|उधार|जमा)/i.test(normalizedText)
   );
 
   if (isCustomerBalanceQuery) {
@@ -258,44 +259,82 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
       const udhaar = targetCust.totalUdhaar || 0;
       const jama = targetCust.totalJama || 0;
       const net = Math.max(0, udhaar - jama);
+      const cName = targetCust.hindiName || targetCust.name;
+
+      const isJamaQuery = /(paisa\s+jama|paise\s+jama|kitna\s+jama|jama\s+kitna|पैसा\s+जमा|पैसे\s+जमा|कितना\s+जमा|जमा\s+कितना|जमा\s+है|जमा\s+किए|जमा\s+किया)/i.test(normalizedText);
 
       let tts_hindi_readback = '';
       let tts_readback = '';
 
-      if (udhaar > 0 && jama > 0) {
-        tts_hindi_readback = `${targetCust.hindiName || targetCust.name} के खाते में कुल ${udhaar} रुपये उधार है और ${jama} रुपये जमा है। कुल बाकी ${net} रुपये है।`;
-        tts_readback = `${targetCust.name} has ₹${udhaar} udhaar and ₹${jama} payment. Net balance is ₹${net}.`;
-      } else if (udhaar > 0) {
-        tts_hindi_readback = `${targetCust.hindiName || targetCust.name} के खाते में कुल ${udhaar} रुपये उधार बाकी है।`;
-        tts_readback = `${targetCust.name} has ₹${udhaar} pending udhaar.`;
-      } else {
-        tts_hindi_readback = `${targetCust.hindiName || targetCust.name} का कोई उधार बाकी नहीं है, खाता चुकता है।`;
-        tts_readback = `${targetCust.name} has zero balance, account is fully settled.`;
-      }
-
-      return {
-        intent: 'CHECK_BALANCE',
-        query_type: 'CUSTOMER_BALANCE',
-        customer_spoken: spokenCust,
-        matched_customer_name: targetCust.name,
-        matched_customer_id: targetCust.id,
-        match_confidence: phoneticMatch.confidence || 0.95,
-        total_amount_inr: udhaar,
-        customer_data: targetCust,
-        items: [],
-        transaction_type: 'QUERY',
-        ignored_side_chatter: ignoredNoiseText,
-        tts_hindi_readback,
-        tts_readback,
-        query_answer: {
-          title: `${targetCust.name} का खाता`,
-          customerName: targetCust.name,
-          hindiName: targetCust.hindiName,
-          mainMetric: `₹${udhaar.toLocaleString('en-IN')}`,
-          metricLabel: 'कुल उधार बाकी',
-          details: `जमा: ₹${jama.toLocaleString('en-IN')}`
+      if (isJamaQuery) {
+        if (jama > 0) {
+          tts_hindi_readback = `${cName} के खाते में अभी तक कुल ${jama} रुपये जमा हैं${net > 0 ? ` (और ${net} रुपये उधार बाकी है)` : ''}।`;
+          tts_readback = `${targetCust.name} has total ₹${jama} deposited so far${net > 0 ? ` (and ₹${net} net udhaar remaining)` : ''}.`;
+        } else {
+          tts_hindi_readback = `${cName} के खाते में अभी तक कोई पैसा जमा नहीं है${udhaar > 0 ? ` (कुल ${udhaar} रुपये उधार बाकी है)` : ''}।`;
+          tts_readback = `${targetCust.name} has zero deposits so far${udhaar > 0 ? ` (total ₹${udhaar} udhaar)` : ''}.`;
         }
-      };
+
+        return {
+          intent: 'CHECK_BALANCE',
+          query_type: 'CUSTOMER_JAMA',
+          customer_spoken: spokenCust,
+          matched_customer_name: targetCust.name,
+          matched_customer_id: targetCust.id,
+          match_confidence: phoneticMatch.confidence || 0.95,
+          total_amount_inr: jama,
+          customer_data: targetCust,
+          items: [],
+          transaction_type: 'QUERY',
+          ignored_side_chatter: ignoredNoiseText,
+          tts_hindi_readback,
+          tts_readback,
+          query_answer: {
+            title: `${cName} का जमा विवरण`,
+            customerName: targetCust.name,
+            hindiName: targetCust.hindiName,
+            mainMetric: `₹${jama.toLocaleString('en-IN')}`,
+            metricLabel: 'कुल जमा राशि (Total Jama)',
+            details: `कुल खरीद: ₹${udhaar.toLocaleString('en-IN')} | शुद्ध बकाया: ₹${net.toLocaleString('en-IN')}`
+          }
+        };
+      } else {
+        // UDHAAR / BAAKI: SPECIFICALLY AFTER SUBTRACTING JAMA (NET BALANCE)
+        if (net > 0 && jama > 0) {
+          tts_hindi_readback = `${cName} के खाते में ${jama} रुपये जमा काटकर, अब कुल ${net} रुपये उधार बाकी है।`;
+          tts_readback = `${targetCust.name} has ₹${net} net udhaar remaining (after deducting ₹${jama} jama).`;
+        } else if (net > 0) {
+          tts_hindi_readback = `${cName} के खाते में कुल ${net} रुपये उधार बाकी है।`;
+          tts_readback = `${targetCust.name} has ₹${net} pending udhaar.`;
+        } else {
+          tts_hindi_readback = `${cName} का कोई उधार बाकी नहीं है, खाता पूरी तरह चुकता है${jama > 0 ? ` (${jama} रुपये जमा दर्ज है)` : ''}।`;
+          tts_readback = `${targetCust.name} has zero balance, account is fully settled${jama > 0 ? ` (₹${jama} jama)` : ''}.`;
+        }
+
+        return {
+          intent: 'CHECK_BALANCE',
+          query_type: 'CUSTOMER_BALANCE',
+          customer_spoken: spokenCust,
+          matched_customer_name: targetCust.name,
+          matched_customer_id: targetCust.id,
+          match_confidence: phoneticMatch.confidence || 0.95,
+          total_amount_inr: net,
+          customer_data: targetCust,
+          items: [],
+          transaction_type: 'QUERY',
+          ignored_side_chatter: ignoredNoiseText,
+          tts_hindi_readback,
+          tts_readback,
+          query_answer: {
+            title: `${cName} का उधार खाता`,
+            customerName: targetCust.name,
+            hindiName: targetCust.hindiName,
+            mainMetric: `₹${net.toLocaleString('en-IN')}`,
+            metricLabel: 'कुल उधार बाकी (Net Balance)',
+            details: `कुल खरीद: ₹${udhaar.toLocaleString('en-IN')} | कुल जमा: ₹${jama.toLocaleString('en-IN')}`
+          }
+        };
+      }
     } else {
       const tts_hindi_readback = `ग्राहक '${spokenCust}' का कोई खाता नहीं मिला। क्या नया खाता खोलना चाहते हैं?`;
       const tts_readback = `No customer record found for '${spokenCust}'.`;
