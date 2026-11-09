@@ -168,7 +168,10 @@ export async function transcribeWithGroqWhisper(apiKey, audioBlob, language = 'h
       const formData = new FormData();
       const isWav = audioBlob.type?.includes('wav');
       const filename = isWav ? 'counter_recording.wav' : 'counter_recording.webm';
-      formData.append('file', audioBlob, filename);
+      const cleanMime = isWav ? 'audio/wav' : 'audio/webm';
+      // Strip codec parameters so Whisper multipart parser never rejects with 400
+      const cleanBlob = new Blob([audioBlob], { type: cleanMime });
+      formData.append('file', cleanBlob, filename);
       formData.append('model', model);
 
       // CRITICAL: Explicitly set language so Whisper never misidentifies Hindi as Arabic/Turkish/Urdu

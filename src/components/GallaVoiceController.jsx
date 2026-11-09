@@ -22,6 +22,7 @@ export default function GallaVoiceController({
   const [typedInput, setTypedInput] = useState('');
 
   const timerRef = useRef(null);
+  const isTogglingRef = useRef(false);
 
   // Live timer while recording
   useEffect(() => {
@@ -45,14 +46,15 @@ export default function GallaVoiceController({
   };
 
   const handleToggleRecord = async () => {
-    if (isProcessing) return;
+    if (isProcessing || isTogglingRef.current) return;
+    isTogglingRef.current = true;
 
-    if (isRecording) {
-      // ⏹️ Click to STOP
-      setIsRecording(false);
-      setStatusMessage(language === 'hi' ? '⚡ AI समझ रहा है...' : '⚡ Processing...');
+    try {
+      if (isRecording) {
+        // ⏹️ Click to STOP
+        setIsRecording(false);
+        setStatusMessage(language === 'hi' ? '⚡ AI समझ रहा है...' : '⚡ Processing...');
 
-      try {
         const result = await audioRecorder.stop();
         if (!result) {
           setStatusMessage('');
@@ -80,22 +82,22 @@ export default function GallaVoiceController({
 
         setStatusMessage('');
         onAudioRecorded(result.blob);
-      } catch (err) {
-        console.error('Stop record error:', err);
-        setStatusMessage(err.message || 'Recording failed.');
-      }
-    } else {
-      // 🎙️ Click to RECORD
-      setStatusMessage('');
-      try {
+      } else {
+        // 🎙️ Click to RECORD
+        setStatusMessage('');
         await audioRecorder.start((volume) => {
           setMicVolume(volume);
         });
         setIsRecording(true);
-      } catch (err) {
-        console.error('Start record error:', err);
-        setStatusMessage(err.message || 'Microphone access failed.');
       }
+    } catch (err) {
+      console.error('Record toggle error:', err);
+      setStatusMessage(err.message || 'Microphone error.');
+      setIsRecording(false);
+    } finally {
+      setTimeout(() => {
+        isTogglingRef.current = false;
+      }, 300);
     }
   };
 

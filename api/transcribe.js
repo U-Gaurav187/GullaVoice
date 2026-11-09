@@ -26,8 +26,11 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'audioBase64 parameter is required.' });
     }
 
+    const isWav = (mimeType || '').includes('wav');
+    const cleanMime = isWav ? 'audio/wav' : 'audio/webm';
+    const filename = isWav ? 'counter_recording.wav' : 'counter_recording.webm';
     const buffer = Buffer.from(audioBase64, 'base64');
-    const blob = new Blob([buffer], { type: mimeType });
+    const blob = new Blob([buffer], { type: cleanMime });
 
     const whisperModels = ['whisper-large-v3-turbo', 'whisper-large-v3'];
     let lastError = null;
@@ -35,7 +38,7 @@ export default async function handler(req, res) {
     for (const model of whisperModels) {
       try {
         const formData = new FormData();
-        formData.append('file', blob, 'counter_recording.wav');
+        formData.append('file', blob, filename);
         formData.append('model', model);
         formData.append('language', language === 'en' ? 'en' : 'hi');
         formData.append(

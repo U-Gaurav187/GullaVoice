@@ -152,7 +152,18 @@ export default function App() {
       await executeAIParser(transcript);
     } catch (err) {
       console.error('Audio processing error:', err);
-      alert('Voice Error: ' + (err.message || 'Error processing audio via AI'));
+      const isMediaErr = (err.message || '').includes('could not process file') || (err.message || '').includes('decode');
+      const userMsg = isMediaErr
+        ? (currentLanguage === 'hi' 
+            ? 'माइक से आवाज़ ठीक से रिकॉर्ड नहीं हो पाई। कृपया दोबारा माइक दबाकर साफ आवाज़ में बोलें।' 
+            : 'Audio recording was interrupted. Please tap the mic and try speaking again.')
+        : (err.message || 'Error processing audio via AI');
+      
+      if (settings.autoReadback) {
+        speechTTS.speak(userMsg, currentLanguage);
+      } else {
+        alert(userMsg);
+      }
     } finally {
       setIsProcessing(false);
     }
