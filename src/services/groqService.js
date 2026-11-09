@@ -60,6 +60,10 @@ OPERATIONAL KIRANA DISCOURSE & LEDGER RULES (CRITICAL):
       * Set "intent": "CHECK_TOTAL_STORE_BALANCE"
       * Compute store net udhaar: netStoreUdhaar = grossUdhaar - storeJama
       * In "tts_hindi_readback", answer clearly: "दुकान में कुल ₹[storeJama] जमा काटकर, अब शुद्ध ₹[netStoreUdhaar] उधार बाकी है।"
+    - When asked to generate/print/export a PDF report (e.g. "PDF banao", "Generate PDF", "उधार का PDF बनाओ", "Khata PDF dikhao"):
+      * Set "intent": "GENERATE_PDF"
+      * Set "query_type": "PDF_REPORT"
+      * In "tts_hindi_readback", answer: "दुकान के सभी बाकी उधारी खातों की PDF रिपोर्ट तैयार कर दी गई है।"
 
 5. RATE CARD VOICE UPDATES:
    - When the shopkeeper gives voice commands to update product prices or add new rates (e.g. "Rate card mein mooli ka daam ₹40 kilo, cheeni ka daam ₹60 kilo, aaloo ka daam ₹45 pao kar do", "रेट कार्ड में मूली 40 रुपये किलो, चीनी 60 रुपये किलो कर दो", "तेल का भाव 150 रुपये कर दो"):

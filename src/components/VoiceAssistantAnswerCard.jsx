@@ -10,7 +10,8 @@ import {
   Receipt,
   Users,
   CheckCircle2,
-  ShoppingBag
+  ShoppingBag,
+  FileText
 } from 'lucide-react';
 
 export default function VoiceAssistantAnswerCard({
@@ -20,6 +21,7 @@ export default function VoiceAssistantAnswerCard({
   onViewCustomer,
   onViewTransactions,
   onViewRateCard,
+  onOpenPdfReport,
   language = 'hi'
 }) {
   if (!queryResult) return null;
@@ -205,6 +207,17 @@ export default function VoiceAssistantAnswerCard({
             >
               <ShoppingBag className="w-3.5 h-3.5 text-amber-600" />
               <span>{isHindi ? 'पूरा रेट कार्ड देखें' : 'View Rate Card'}</span>
+            </button>
+          )}
+
+          {(query_type === 'PDF_REPORT' || queryResult.intent === 'GENERATE_PDF') && onOpenPdfReport && (
+            <button
+              type="button"
+              onClick={onOpenPdfReport}
+              className="px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>{isHindi ? 'PDF रिपोर्ट खोलें' : 'Open PDF Report'}</span>
             </button>
           )}
         </div>

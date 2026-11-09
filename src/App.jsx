@@ -22,6 +22,7 @@ import SettingsModal from './components/SettingsModal.jsx';
 import LanguageSelectModal from './components/LanguageSelectModal.jsx';
 import PurchaseDetailModal from './components/PurchaseDetailModal.jsx';
 import VoiceAssistantAnswerCard from './components/VoiceAssistantAnswerCard.jsx';
+import KhataPdfModal from './components/KhataPdfModal.jsx';
 
 import { storage } from './utils/storage.js';
 import { speechTTS } from './utils/speechTTS.js';
@@ -52,6 +53,7 @@ export default function App() {
   const [isRateCardOpen, setIsRateCardOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLanguageModalOpen, setIsLanguageModalOpen] = useState(false);
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
 
@@ -652,6 +654,10 @@ export default function App() {
         };
       }
 
+      if (parsedResult.intent === 'GENERATE_PDF' || parsedResult.query_type === 'PDF_REPORT') {
+        setIsPdfModalOpen(true);
+      }
+
       setVoiceQueryResult({
         ...parsedResult,
         rawTranscript: transcriptText
@@ -898,6 +904,7 @@ export default function App() {
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenRateCard={() => setIsRateCardOpen(true)}
         onOpenLanguageModal={() => setIsLanguageModalOpen(true)}
+        onOpenPdfReport={() => setIsPdfModalOpen(true)}
         transactions={transactions}
         customers={customers}
         totalUdhaar={totalUdhaar}
@@ -931,6 +938,10 @@ export default function App() {
                 }}
                 onViewRateCard={() => {
                   setIsRateCardOpen(true);
+                  setVoiceQueryResult(null);
+                }}
+                onOpenPdfReport={() => {
+                  setIsPdfModalOpen(true);
                   setVoiceQueryResult(null);
                 }}
                 language={currentLanguage}
@@ -1002,6 +1013,7 @@ export default function App() {
             <CustomerKhataTable
               customers={customers}
               onSelectCustomer={setSelectedCustomer}
+              onOpenPdfReport={() => setIsPdfModalOpen(true)}
               language={currentLanguage}
             />
           </div>
@@ -1047,6 +1059,14 @@ export default function App() {
         transactions={transactions}
         customers={customers}
         rateCard={rateCard}
+      />
+
+      {/* Debtors Khata PDF Generation Modal */}
+      <KhataPdfModal
+        isOpen={isPdfModalOpen}
+        onClose={() => setIsPdfModalOpen(false)}
+        customers={customers}
+        language={currentLanguage}
       />
     </div>
   );

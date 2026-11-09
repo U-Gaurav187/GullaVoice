@@ -5,6 +5,7 @@ import {
   ArrowDownLeft, 
   Share2, 
   Search, 
+  FileText,
   ChevronRight,
   TrendingUp,
   TrendingDown
@@ -13,6 +14,7 @@ import {
 export default function CustomerKhataTable({
   customers = [],
   onSelectCustomer,
+  onOpenPdfReport,
   language = 'hi'
 }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -51,16 +53,30 @@ export default function CustomerKhataTable({
           </p>
         </div>
 
-        {/* Search Input */}
-        <div className="relative w-full sm:w-64">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
-          <input
-            type="text"
-            placeholder="ग्राहक या उपनाम खोजें..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full text-xs pl-8 pr-3 py-1.5 rounded-xl border border-stone-300 bg-white focus:outline-none focus:border-orange-500"
-          />
+        {/* Search Input & PDF Generation Toolbar */}
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="relative w-full sm:w-60">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
+            <input
+              type="text"
+              placeholder="ग्राहक या उपनाम खोजें..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full text-xs pl-8 pr-3 py-1.5 rounded-xl border border-stone-300 bg-white focus:outline-none focus:border-orange-500"
+            />
+          </div>
+
+          {onOpenPdfReport && (
+            <button
+              type="button"
+              onClick={onOpenPdfReport}
+              className="px-3 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs transition-all hover:scale-[1.02] active:scale-95 shrink-0 cursor-pointer"
+              title="उधारी खाता PDF बनाएं (Generate Debtors PDF)"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Generate PDF</span>
+            </button>
+          )}
         </div>
       </div>
 

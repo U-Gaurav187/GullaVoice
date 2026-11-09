@@ -94,7 +94,37 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
     }
   }
 
-  // Step 2.5: Check for 2-Way Conversational Ledger Queries
+  // Step 2.5: Check for PDF Generation Intent (e.g. "PDF banao", "Generate PDF", "उधार का PDF बनाओ", "Khata PDF bana do")
+  const isPdfIntent = /(?:pdf|पी\s*डी\s*एफ|पीडीएफ)/i.test(rawTranscript || normalizedText) && 
+    /(?:generate|banao|bana|dikhao|export|print|download|chahiye|report|चाहिए|बनाओ|बना|दिखाओ|प्रिंट|डाउनलोड|निकालो|रिपोर्ट)/iu.test(rawTranscript || normalizedText);
+
+  if (isPdfIntent) {
+    const debtors = customers.filter(c => ((c.totalUdhaar || 0) - (c.totalJama || 0)) > 0);
+    const totalNetPending = debtors.reduce((sum, c) => sum + Math.max(0, (c.totalUdhaar || 0) - (c.totalJama || 0)), 0);
+
+    return {
+      intent: 'GENERATE_PDF',
+      query_type: 'PDF_REPORT',
+      customer_spoken: '',
+      matched_customer_name: 'उधारी बहीखाता PDF',
+      matched_customer_id: null,
+      total_amount_inr: totalNetPending,
+      items: [],
+      transaction_type: 'QUERY',
+      ignored_side_chatter: ignoredNoiseText,
+      tts_hindi_readback: `दुकान के ${debtors.length} बाकी उधारी खातों की PDF रिपोर्ट तैयार कर दी गई है।`,
+      tts_readback: `Prepared PDF report for ${debtors.length} pending debtor accounts.`,
+      query_answer: {
+        title: 'उधारी बहीखाता PDF रिपोर्ट',
+        customerName: `${debtors.length} बाकी ग्राहक`,
+        mainMetric: `₹${totalNetPending.toLocaleString('en-IN')}`,
+        metricLabel: 'कुल शुद्ध बाकी',
+        details: 'PDF फाइल स्क्रीन पर खोल दी गई है, आप इसे प्रिंट या सेव कर सकते हैं।'
+      }
+    };
+  }
+
+  // Step 2.6: Check for 2-Way Conversational Ledger Queries
   // Examples:
   // - "Ramesh ka kitna udhaar baaki hai?" / "रमेश भाई का खाता बताओ"
   // - "Aaj kitni sale hui?" / "Aaj kitna udhaar hua?"

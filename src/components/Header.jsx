@@ -4,6 +4,7 @@ import {
   Settings, 
   ShoppingBag, 
   Download, 
+  FileText,
   Languages, 
   Sparkles, 
   Receipt, 
@@ -18,6 +19,7 @@ export default function Header({
   onOpenSettings,
   onOpenRateCard,
   onOpenLanguageModal,
+  onOpenPdfReport,
   transactions = [],
   customers = [],
   totalUdhaar = 0,
@@ -150,6 +152,16 @@ export default function Header({
             title="दर सूची (Store Rate Card)"
           >
             <ShoppingBag className="w-4 h-4 text-stone-600" />
+          </button>
+
+          {/* Generate PDF Report */}
+          <button
+            onClick={onOpenPdfReport}
+            className="px-2.5 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs transition-all hover:scale-[1.02] active:scale-95 cursor-pointer"
+            title="उधारी बहीखाता PDF बनाएं (Generate Debtors PDF Report)"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Generate PDF</span>
           </button>
 
           {/* Export CSV */}
