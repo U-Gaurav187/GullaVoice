@@ -48,7 +48,21 @@ OPERATIONAL KIRANA DISCOURSE & LEDGER RULES (CRITICAL):
    - When asked about store total (e.g. "Dukan me kul kitna udhaar hai?"):
      * Set "intent": "CHECK_TOTAL_STORE_BALANCE"
 
-5. DUAL-LANGUAGE VOICE READBACK:
+5. RATE CARD VOICE UPDATES:
+   - When the shopkeeper gives voice commands to update product prices or add new rates (e.g. "Rate card mein mooli ka daam ₹40 kilo, cheeni ka daam ₹60 kilo, aaloo ka daam ₹45 pao kar do", "रेट कार्ड में मूली 40 रुपये किलो, चीनी 60 रुपये किलो कर दो", "तेल का भाव 150 रुपये कर दो"):
+     * Set "intent": "UPDATE_RATE_CARD"
+     * Extract each rate update into "rate_card_updates":
+       [
+         {
+           "name": "Mooli",
+           "hindiName": "मूली",
+           "new_price": 40,
+           "unit": "kg"
+         }
+       ]
+     * In "tts_hindi_readback", confirm clearly in Hindi: "रेट कार्ड अपडेट हो गया है: मूली ₹40/किलो, चीनी ₹60/किलो, और आलू ₹45/पाव दर्ज कर दिया गया है।"
+
+6. DUAL-LANGUAGE VOICE READBACK:
    - "tts_hindi_readback": Clear, natural Devanagari Hindi readback confirming the customer name, items, and total amount, or speaking the direct query answer with exact ledger rupees.
    - "tts_readback": English/Hinglish readback.
 
@@ -61,10 +75,18 @@ Respond strictly in valid JSON conforming to this schema:
       "action": "TARGET | RECORD | IGNORE"
     }
   ],
-  "intent": "CREATE_UDHAAR | RECEIVE_JAMA | CHECK_BALANCE | CHECK_TODAY_SUMMARY | CHECK_HIGHEST_UDHAAR | CHECK_TOTAL_STORE_BALANCE | NOISE_ONLY",
+  "intent": "CREATE_UDHAAR | RECEIVE_JAMA | CHECK_BALANCE | CHECK_TODAY_SUMMARY | CHECK_HIGHEST_UDHAAR | CHECK_TOTAL_STORE_BALANCE | UPDATE_RATE_CARD | NOISE_ONLY",
   "customer_spoken": "string",
   "matched_customer_name": "string",
   "match_confidence": 0.95,
+  "rate_card_updates": [
+    {
+      "name": "string",
+      "hindiName": "string",
+      "new_price": 0,
+      "unit": "kg | pao | pkt | ltr | pc"
+    }
+  ],
   "items": [
     {
       "name": "string",

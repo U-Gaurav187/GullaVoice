@@ -9,7 +9,8 @@ import {
   TrendingUp,
   Receipt,
   Users,
-  CheckCircle2
+  CheckCircle2,
+  ShoppingBag
 } from 'lucide-react';
 
 export default function VoiceAssistantAnswerCard({
@@ -18,12 +19,13 @@ export default function VoiceAssistantAnswerCard({
   onReplayAudio,
   onViewCustomer,
   onViewTransactions,
+  onViewRateCard,
   language = 'hi'
 }) {
   if (!queryResult) return null;
 
   const isHindi = language === 'hi';
-  const { query_answer, tts_hindi_readback, tts_readback, ignored_side_chatter, customer_data, query_type } = queryResult;
+  const { query_answer, tts_hindi_readback, tts_readback, ignored_side_chatter, customer_data, query_type, rate_card_updates } = queryResult;
   const answerText = isHindi ? (tts_hindi_readback || tts_readback) : (tts_readback || tts_hindi_readback);
 
   return (
@@ -117,7 +119,38 @@ export default function VoiceAssistantAnswerCard({
         </div>
       </div>
 
-      {/* Spoken Response Voice Sentence Box with Replay Button */}
+      {/* Rate Card Updated Items List */}
+      {rate_card_updates && rate_card_updates.length > 0 && (
+        <div className="mb-4 space-y-2 p-3.5 rounded-2xl bg-white border border-stone-200 shadow-2xs">
+          <span className="text-[11px] font-bold text-stone-500 uppercase tracking-wider block">
+            {isHindi ? 'अपडेट किए गए सामान (Updated Items):' : 'Updated Items:'}
+          </span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {rate_card_updates.map((item, idx) => (
+              <div key={idx} className="p-2.5 rounded-xl bg-amber-50/60 border border-amber-200/80 flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-bold text-stone-900 block">
+                    {item.hindiName || item.name}
+                  </span>
+                  <span className="text-[10px] text-stone-500">
+                    {item.isNew 
+                      ? (isHindi ? '✨ नया सामान जोड़ा गया' : '✨ New Item Added') 
+                      : (isHindi ? `पहले: ₹${item.oldPrice}` : `Was: ₹${item.oldPrice}`)}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-base font-black text-amber-900 font-mono">
+                    ₹{item.newPrice}
+                  </span>
+                  <span className="text-[11px] font-semibold text-stone-600 block">
+                    /{item.unit === 'pao' ? (isHindi ? 'पाव' : 'pao') : item.unit === 'pkt' ? (isHindi ? 'पैकेट' : 'pkt') : item.unit === 'ltr' ? (isHindi ? 'लीटर' : 'ltr') : item.unit === 'pc' ? (isHindi ? 'नग' : 'pc') : (isHindi ? 'किग्रा' : 'kg')}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {answerText && (
         <div className="p-3.5 rounded-2xl bg-white border border-stone-200 shadow-2xs mb-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
@@ -161,6 +194,17 @@ export default function VoiceAssistantAnswerCard({
             >
               <Receipt className="w-3.5 h-3.5 text-amber-600" />
               <span>{isHindi ? 'आज का रोजनामचा देखें' : 'View Transactions'}</span>
+            </button>
+          )}
+
+          {query_type === 'RATE_CARD_UPDATED' && onViewRateCard && (
+            <button
+              type="button"
+              onClick={onViewRateCard}
+              className="px-3.5 py-2 rounded-xl bg-white hover:bg-stone-50 border border-stone-300 text-stone-800 text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <ShoppingBag className="w-3.5 h-3.5 text-amber-600" />
+              <span>{isHindi ? 'पूरा रेट कार्ड देखें' : 'View Rate Card'}</span>
             </button>
           )}
         </div>

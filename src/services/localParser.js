@@ -48,6 +48,52 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
   // Step 2: Normalize numbers & colloquial quantities ("dedh sau", "aadha kilo", etc.)
   const normalizedText = normalizeColloquialQuantities(cleanedCommand);
 
+  // Step 2.4: Check for Rate Card Update Voice Commands
+  // Examples:
+  // - "Rate card mein mooli ka daam ₹40 kilo, cheeni ka daam ₹60 kilo, aaloo ka daam ₹45 pao kar do"
+  // - "रेट कार्ड में मूली का दाम 40 रुपये किलो, चीनी का दाम 60 रुपये किलो, आलू का दाम 45 पाव कर दो"
+  // - "चीनी का भाव 50 रुपये किलो कर दो"
+  const isRateCardUpdate = (
+    /(rate\s*card|रेट\s*कार्ड)/i.test(normalizedText) &&
+    /(daam|bhav|rate|price|दाम|भाव|रेट|कीमत|kilo|kg|किलो|pao|pav|पाव|packet|pkt|पैकेट|rup|रुप|kar\s*do|badal\s*do|update|कर\s*दो|बदल\s*दो)/i.test(normalizedText)
+  ) || (
+    /(?:ka|ke|ki|का|के|की)\s*(?:daam|bhav|rate|price|दाम|भाव|रेट|कीमत)\s*(?:₹|रु|रुपये|rs\.?)?\s*\d+/iu.test(normalizedText) &&
+    /(kar\s*do|badal\s*do|update|likh\s*do|कर\s*दो|बदल\s*दो|लिख\s*दो|डाल\s*दो)/iu.test(normalizedText)
+  );
+
+  if (isRateCardUpdate) {
+    const updates = extractRateCardUpdatesFromText(rawTranscript || normalizedText, rateCard);
+    if (updates.length > 0) {
+      const summaryItemsHindi = updates.map(u => `${u.hindiName || u.name} ₹${u.newPrice}/${u.unitLabel}`).join(', ');
+      const summaryItemsEng = updates.map(u => `${u.name} ₹${u.newPrice}/${u.unit}`).join(', ');
+
+      const tts_hindi_readback = `रेट कार्ड अपडेट हो गया है: ${summaryItemsHindi} दर्ज कर दिया गया है।`;
+      const tts_readback = `Rate card updated: ${summaryItemsEng} recorded.`;
+
+      return {
+        intent: 'UPDATE_RATE_CARD',
+        query_type: 'RATE_CARD_UPDATED',
+        rate_card_updates: updates,
+        items: [],
+        customer_spoken: '',
+        matched_customer_name: '',
+        matched_customer_id: null,
+        total_amount_inr: updates.length,
+        transaction_type: 'QUERY',
+        ignored_side_chatter: ignoredNoiseText,
+        tts_hindi_readback,
+        tts_readback,
+        query_answer: {
+          title: 'रेट कार्ड अपडेट (Rate Card Updated)',
+          customerName: 'रेट कार्ड (Rate Card)',
+          mainMetric: `${updates.length} सामान अपडेट`,
+          metricLabel: 'दाम बदले गए',
+          details: summaryItemsHindi
+        }
+      };
+    }
+  }
+
   // Step 2.5: Check for 2-Way Conversational Ledger Queries
   // Examples:
   // - "Ramesh ka kitna udhaar baaki hai?" / "रमेश भाई का खाता बताओ"
@@ -424,4 +470,52 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
     price_sanity_note: sanityResult.notes,
     tts_hindi_readback
   };
+}
+
+/**
+ * Extracts item price updates from natural spoken Rate Card commands
+ */
+export function extractRateCardUpdatesFromText(rawText = '', rateCard = []) {
+  let clean = rawText.replace(/^(?:rate\s*card\s*(?:mein|me|update)?|रेट\s*कार्ड\s*(?:में|अपडेट)?)\s*/iu, '');
+  clean = clean.replace(/(?:kar\s*do|likh\s*do|badal\s*do|update\s*karo|कर\s*दो|लिख\s*दो|बदल\s*दो|अपडेट\s*करो)[.।]?$/iu, '');
+
+  const regex = /([a-zA-Z\u0900-\u097F]+(?:\s+[a-zA-Z\u0900-\u097F]+)?)\s+(?:(?:ka|ke|ki|का|के|की)\s+)?(?:daam|bhav|rate|price|दाम|भाव|रेट|कीमत)?\s*(?:₹|रु|रुपये|rs\.?|inr)?\s*(\d+(?:\.\d+)?)\s*(?:₹|रु|रुपये|rs\.?|rupee|rupees)?\s*(kilo|kg|किलो|pao|pav|पाव|packet|pkt|पैकेट|liter|litre|लीटर|piece|pc|नग)?/giu;
+
+  const updates = [];
+  let m;
+  while ((m = regex.exec(clean)) !== null) {
+    let rawName = m[1].replace(/^(?:aur|and|और)\s+/iu, '').trim();
+    rawName = rawName.replace(/\s+(?:ka|ke|ki|का|के|की)$/iu, '').trim();
+    if (/^(?:rate|card|रेट|कार्ड|दाम|भाव|update|karo|करो)$/i.test(rawName)) continue;
+
+    let price = parseFloat(m[2]);
+    let rawUnit = (m[3] || 'kg').toLowerCase();
+
+    let unit = 'kg';
+    let unitLabel = 'किलो';
+    if (/पाव|pao|pav/i.test(rawUnit)) { unit = 'pao'; unitLabel = 'पाव'; }
+    else if (/पैकेट|packet|pkt/i.test(rawUnit)) { unit = 'pkt'; unitLabel = 'पैकेट'; }
+    else if (/लीटर|liter|litre|ltr/i.test(rawUnit)) { unit = 'ltr'; unitLabel = 'लीटर'; }
+    else if (/piece|pc|नग/i.test(rawUnit)) { unit = 'pc'; unitLabel = 'नग'; }
+
+    // Match against existing rateCard
+    const lower = rawName.toLowerCase();
+    const existing = (rateCard || []).find(rc => 
+      rc.name.toLowerCase() === lower ||
+      rc.hindiName === rawName ||
+      (rc.aliases && rc.aliases.some(a => a.toLowerCase() === lower || lower.includes(a.toLowerCase())))
+    );
+
+    updates.push({
+      name: existing ? existing.name : (rawName.charAt(0).toUpperCase() + rawName.slice(1)),
+      hindiName: existing ? (existing.hindiName || rawName) : rawName,
+      oldPrice: existing ? existing.unitPrice : null,
+      newPrice: price,
+      unit: unit,
+      unitLabel: unitLabel,
+      isNew: !existing,
+      id: existing ? existing.id : `ITEM_${Date.now()}_${updates.length}`
+    });
+  }
+  return updates;
 }

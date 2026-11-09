@@ -29,7 +29,7 @@ import { matchCustomerPhonetically } from './utils/phoneticMatcher.js';
 import { transcribeWithGroqWhisper, parseWithGroqLlama } from './services/groqService.js';
 import { transcribeWithWisprFlow } from './services/wisprFlowService.js';
 import { parseWithGeminiFlash } from './services/geminiService.js';
-import { parseKiranaVoiceLocally } from './services/localParser.js';
+import { parseKiranaVoiceLocally, extractRateCardUpdatesFromText } from './services/localParser.js';
 
 export default function App() {
   // Persistent database states
@@ -301,6 +301,124 @@ export default function App() {
       if (parsedResult.total_amount_inr > 0 && parsedResult.tts_hindi_readback && parsedResult.tts_hindi_readback.includes('शून्य')) {
         const itemSummaries = parsedResult.items.map(i => `${i.quantity} ${i.name}`).join(' और ');
         parsedResult.tts_hindi_readback = `${parsedResult.matched_customer_name || 'ग्राहक'} के खाते में ${itemSummaries}, कुल ₹${parsedResult.total_amount_inr} उधार। क्या इसे सेव करें?`;
+      }
+    }
+
+    // Step: Check for Rate Card Voice Updates
+    const isRateCardUpdate = parsedResult.intent === 'UPDATE_RATE_CARD' || 
+      (parsedResult.rate_card_updates && parsedResult.rate_card_updates.length > 0) ||
+      (/(rate\s*card|रेट\s*कार्ड)/i.test(transcriptText) && /(daam|bhav|rate|price|दाम|भाव|रेट|कीमत|kilo|kg|pao|pav|kar\s*do|badal\s*do|update)/i.test(transcriptText));
+
+    if (isRateCardUpdate) {
+      setStagedDraft(null);
+
+      let updates = parsedResult.rate_card_updates;
+      if (!updates || updates.length === 0) {
+        updates = extractRateCardUpdatesFromText(transcriptText, rateCard);
+      }
+
+      if (updates && updates.length > 0) {
+        let updatedRateCard = [...rateCard];
+        const appliedUpdates = [];
+
+        for (const u of updates) {
+          const uPrice = parseFloat(u.new_price || u.newPrice || u.price);
+          if (isNaN(uPrice) || uPrice <= 0) continue;
+
+          const uName = (u.name || '').trim();
+          const uHindi = (u.hindiName || uName).trim();
+          const uUnit = (u.unit || 'kg').toLowerCase();
+
+          const lower = uName.toLowerCase();
+          const idx = updatedRateCard.findIndex(rc => 
+            rc.name.toLowerCase() === lower ||
+            (rc.hindiName && rc.hindiName === uHindi) ||
+            (rc.aliases && rc.aliases.some(a => a.toLowerCase() === lower || lower.includes(a.toLowerCase())))
+          );
+
+          if (idx >= 0) {
+            const oldItem = updatedRateCard[idx];
+            updatedRateCard[idx] = {
+              ...oldItem,
+              unitPrice: uPrice,
+              unit: uUnit
+            };
+            appliedUpdates.push({
+              name: oldItem.name,
+              hindiName: oldItem.hindiName || uHindi,
+              oldPrice: oldItem.unitPrice,
+              newPrice: uPrice,
+              unit: uUnit,
+              isNew: false
+            });
+          } else {
+            // Auto-bilingual mapping for common Kirana produce
+            let hindiEquiv = uHindi;
+            if (/mooli|muli/i.test(uName)) hindiEquiv = 'मूली';
+            else if (/aaloo|aloo/i.test(uName)) hindiEquiv = 'आलू';
+            else if (/pyaaz|pyaz|kanda/i.test(uName)) hindiEquiv = 'प्याज';
+            else if (/tamatar/i.test(uName)) hindiEquiv = 'टमाटर';
+            else if (/mirch|mirchi/i.test(uName)) hindiEquiv = 'मिर्च';
+            else if (/adrak/i.test(uName)) hindiEquiv = 'अदरक';
+            else if (/nimbu/i.test(uName)) hindiEquiv = 'नींबू';
+
+            const newItem = {
+              id: `ITEM_${Date.now()}_${appliedUpdates.length}`,
+              name: uName.charAt(0).toUpperCase() + uName.slice(1),
+              displayName: `${uName.charAt(0).toUpperCase() + uName.slice(1)} (${hindiEquiv})`,
+              hindiName: hindiEquiv,
+              aliases: Array.from(new Set([uName.toLowerCase(), uHindi.toLowerCase(), hindiEquiv.toLowerCase()])),
+              unit: uUnit,
+              unitPrice: uPrice,
+              category: 'Vegetables'
+            };
+            updatedRateCard.push(newItem);
+            appliedUpdates.push({
+              name: newItem.name,
+              hindiName: newItem.hindiName,
+              oldPrice: null,
+              newPrice: uPrice,
+              unit: uUnit,
+              isNew: true
+            });
+          }
+        }
+
+        setRateCard(updatedRateCard);
+        storage.saveRateCard(updatedRateCard);
+
+        const summaryHindi = appliedUpdates.map(u => `${u.hindiName || u.name} ₹${u.newPrice}/${u.unit === 'pao' ? 'पाव' : u.unit === 'pkt' ? 'पैकेट' : 'किलो'}`).join(', ');
+        const summaryEng = appliedUpdates.map(u => `${u.name} ₹${u.newPrice}/${u.unit}`).join(', ');
+
+        const hindiReadback = `रेट कार्ड अपडेट हो गया है: ${summaryHindi} दर्ज कर दिया गया है।`;
+        const engReadback = `Rate card updated: ${summaryEng} saved.`;
+
+        const answerPayload = {
+          intent: 'UPDATE_RATE_CARD',
+          query_type: 'RATE_CARD_UPDATED',
+          rate_card_updates: appliedUpdates,
+          rawTranscript: transcriptText,
+          total_amount_inr: appliedUpdates.length,
+          tts_hindi_readback: hindiReadback,
+          tts_readback: engReadback,
+          query_answer: {
+            title: 'रेट कार्ड अपडेट (Rate Card Updated)',
+            customerName: 'रेट कार्ड (Rate Card)',
+            mainMetric: `${appliedUpdates.length} सामान अपडेट`,
+            metricLabel: 'दाम बदले गए',
+            details: summaryHindi
+          }
+        };
+
+        setVoiceQueryResult(answerPayload);
+        setFilteredNoise(parsedResult.ignored_side_chatter || '');
+
+        const readbackSentence = currentLanguage === 'hi' ? hindiReadback : engReadback;
+        setTimeout(() => {
+          speechTTS.speak(readbackSentence, currentLanguage);
+        }, 150);
+
+        return;
       }
     }
 
@@ -766,6 +884,10 @@ export default function App() {
                 }}
                 onViewTransactions={() => {
                   setActiveTab('TRANSACTIONS');
+                  setVoiceQueryResult(null);
+                }}
+                onViewRateCard={() => {
+                  setIsRateCardOpen(true);
                   setVoiceQueryResult(null);
                 }}
                 language={currentLanguage}
