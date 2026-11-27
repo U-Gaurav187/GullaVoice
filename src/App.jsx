@@ -1079,28 +1079,30 @@ export default function App() {
       handleRetry();
       return;
     }
-    if (localFollowUp?.action === 'UPDATE_DRAFT' && localFollowUp.updatedDraft) {
-      setStagedDraft(localFollowUp.updatedDraft);
-      const readback = currentLanguage === 'hi'
-        ? localFollowUp.updatedDraft.tts_hindi_readback
-        : localFollowUp.updatedDraft.tts_readback;
-      if (settings.autoReadback && readback) {
-        setTimeout(() => speechTTS.speak(readback, currentLanguage, () => triggerHandsFreeFollowUp('STAGING')), 120);
+    if (localFollowUp?.action === 'ASK_CORRECTION') {
+      const askMsg = currentLanguage === 'hi'
+        ? 'ठीक है, बताइए क्या सही करना है? नाम, सामान या मात्रा बोलें।'
+        : 'Okay, tell me what to fix — the customer name, item, or quantity.';
+      if (settings.autoReadback) {
+        setTimeout(() => speechTTS.speak(askMsg, currentLanguage, () => triggerHandsFreeFollowUp('STAGING')), 120);
       } else {
         setTimeout(() => triggerHandsFreeFollowUp('STAGING'), 200);
       }
       return;
     }
 
-    // Fallback to Groq if the user spoke a complex multi-clause edit not handled locally
+    // Dynamic restructuring: Try Groq LLM with full current draft context first,
+    // then apply local phonetic customer matching + rate card pricing, or fallback to localFollowUp.
     setIsProcessing(true);
+    let finalUpdatedDraft = null;
+
     try {
       const contextualPrompt = `CURRENT STAGED DRAFT: ${JSON.stringify({
         customer: stagedDraft.matched_customer_name || stagedDraft.customer_spoken,
         transaction_type: stagedDraft.transaction_type,
         items: stagedDraft.items,
         total_amount_inr: stagedDraft.total_amount_inr
-      })}. USER VOICE CORRECTION: "${followUpText}". Update ONLY the changed customer name or item quantities/prices and return the full updated transaction JSON.`;
+      })}. USER VOICE CORRECTION: "${followUpText}". Restructure the transaction according to the user's correction (replace items/names if corrected, or update quantity/price), calculate prices from STORE RATE CARD, and return the complete updated JSON ending tts_hindi_readback with "क्या इसे सेव करें?".`;
 
       const groqUpdated = await parseWithGroqLlama({
         apiKey: effectiveGroqKey,
@@ -1110,27 +1112,72 @@ export default function App() {
         language: currentLanguage
       });
 
-      if (groqUpdated && (groqUpdated.matched_customer_name || groqUpdated.customer_spoken)) {
-        const merged = {
+      if (groqUpdated && groqUpdated.intent !== 'NOISE_ONLY' && (groqUpdated.matched_customer_name || groqUpdated.customer_spoken || (groqUpdated.items && groqUpdated.items.length > 0))) {
+        const spokenCust = groqUpdated.customer_spoken || groqUpdated.matched_customer_name || stagedDraft.customer_spoken;
+        const pMatch = spokenCust ? matchCustomerPhonetically(spokenCust, customers, 0.65) : { isMatch: false };
+
+        let computedTotal = Number(groqUpdated.total_amount_inr) || 0;
+        const enrichedItems = (groqUpdated.items || stagedDraft.items || []).map(item => {
+          const itemRate = rateCard.find(r =>
+            r.name.toLowerCase() === (item.name || '').toLowerCase() ||
+            r.hindiName === item.name ||
+            (r.aliases && r.aliases.some(a => (item.name || '').toLowerCase().includes(a.toLowerCase())))
+          );
+          let calcPrice = Number(item.calculated_price_inr) || 0;
+          if (calcPrice === 0 && itemRate) {
+            const qtyMatch = String(item.quantity || '1').match(/(\d+(\.\d+)?)/);
+            const qty = qtyMatch ? parseFloat(qtyMatch[1]) : 1;
+            calcPrice = Math.round(itemRate.unitPrice * qty);
+          }
+          return { ...item, calculated_price_inr: calcPrice };
+        });
+
+        if (enrichedItems.length > 0 && (groqUpdated.transaction_type || stagedDraft.transaction_type) === 'UDHAAR') {
+          const sumItems = enrichedItems.reduce((s, it) => s + (Number(it.calculated_price_inr) || 0), 0);
+          if (sumItems > 0 && computedTotal === 0) computedTotal = sumItems;
+        }
+
+        finalUpdatedDraft = {
           ...stagedDraft,
           ...groqUpdated,
-          customer_spoken: groqUpdated.customer_spoken || groqUpdated.matched_customer_name || stagedDraft.customer_spoken,
-          matched_customer_name: groqUpdated.matched_customer_name || groqUpdated.customer_spoken || stagedDraft.matched_customer_name
+          customer_spoken: spokenCust,
+          matched_customer_name: pMatch.isMatch ? pMatch.matchedName : (groqUpdated.matched_customer_name || spokenCust || stagedDraft.matched_customer_name),
+          matched_customer_id: pMatch.isMatch ? pMatch.customer.id : (stagedDraft.matched_customer_id || null),
+          match_confidence: pMatch.isMatch ? pMatch.confidence : (groqUpdated.match_confidence || stagedDraft.match_confidence),
+          items: enrichedItems,
+          total_amount_inr: computedTotal
         };
-        setStagedDraft(merged);
-        const readback = currentLanguage === 'hi'
-          ? (merged.tts_hindi_readback || merged.tts_readback)
-          : (merged.tts_readback || merged.tts_hindi_readback);
-        if (settings.autoReadback && readback) {
-          setTimeout(() => speechTTS.speak(readback, currentLanguage, () => triggerHandsFreeFollowUp('STAGING')), 120);
-        } else {
-          setTimeout(() => triggerHandsFreeFollowUp('STAGING'), 200);
-        }
       }
     } catch (err) {
-      console.warn('Staging follow-up edit error:', err.message);
+      console.warn('Groq dynamic staging correction failed, using local engine:', err.message);
     } finally {
       setIsProcessing(false);
+    }
+
+    if (!finalUpdatedDraft && localFollowUp?.action === 'UPDATE_DRAFT' && localFollowUp.updatedDraft) {
+      finalUpdatedDraft = localFollowUp.updatedDraft;
+    }
+
+    if (finalUpdatedDraft) {
+      setStagedDraft(finalUpdatedDraft);
+      const readback = currentLanguage === 'hi'
+        ? (finalUpdatedDraft.tts_hindi_readback || finalUpdatedDraft.tts_readback)
+        : (finalUpdatedDraft.tts_readback || finalUpdatedDraft.tts_hindi_readback);
+      if (settings.autoReadback && readback) {
+        setTimeout(() => speechTTS.speak(readback, currentLanguage, () => triggerHandsFreeFollowUp('STAGING')), 120);
+      } else {
+        setTimeout(() => triggerHandsFreeFollowUp('STAGING'), 200);
+      }
+    } else {
+      // Unclear reply -> keep draft open and ask again hands-free
+      const retryAsk = currentLanguage === 'hi'
+        ? 'समझ नहीं आया। कृपया "Confirm" बोलें, या सही नाम और सामान फिर से बोलें।'
+        : 'Did not catch that. Say "Confirm", or restate the customer name and items.';
+      if (settings.autoReadback) {
+        setTimeout(() => speechTTS.speak(retryAsk, currentLanguage, () => triggerHandsFreeFollowUp('STAGING')), 120);
+      } else {
+        setTimeout(() => triggerHandsFreeFollowUp('STAGING'), 200);
+      }
     }
   };
 

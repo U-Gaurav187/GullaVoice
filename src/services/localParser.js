@@ -827,18 +827,24 @@ export function parseStagingVoiceFollowUp(rawText = '', stagedDraft = null, cust
   if (!rawText || !rawText.trim() || !stagedDraft) return null;
 
   const trimmed = rawText.trim();
-  const normalized = normalizeColloquialQuantities(trimmed);
+  const cleanPunct = trimmed.replace(/[।.,!?]+$/g, '').trim();
 
-  // 1. Check RETRY / CANCEL (must check negative commands before positive ones)
-  const isRetry = /(?:^|[\s,।])(?:retry|cancel|discard|galat|galat\s*hai|mat\s*karo|dobara|गलत|गलत\s*है|दोबारा|रद्द|मत\s*करो|कैंसल)(?:[\s,।!]|$)/iu.test(trimmed) ||
-    (/^(?:no|nahi|नहीं|ना)$/iu.test(trimmed));
+  // 1a. Pure negative ("नहीं" / "No" / "Nahi" alone with NO correction words after)
+  // Keep draft open and ask what needs to be changed!
+  if (/^(?:no|nahi|nahin|na|नहीं|ना|गलत|गलत\s*है)$/iu.test(cleanPunct)) {
+    return { action: 'ASK_CORRECTION' };
+  }
+
+  // 1b. Explicit full discard / cancel ("Retry", "Cancel", "रद्द करो", "दोबारा बोलना है")
+  const hasInlineCorrectionContent = /(\d|kilo|kg|packet|pkt|tel|aloo|cheeni|chawal|dal|तेल|आलू|चीनी|चावल|दाल|वैशाली|रमेश|ka\s+|ko\s+|के\s+|का\s+|को\s+)/iu.test(trimmed);
+  const isRetry = !hasInlineCorrectionContent && /(?:^|[\s,।])(?:retry|cancel|discard|mat\s*karo|dobara|रद्द|मत\s*करो|कैंसल|दोबारा)(?:[\s,।!]|$)/iu.test(trimmed);
 
   if (isRetry) {
     return { action: 'RETRY' };
   }
 
-  // 2. Check CONFIRM / SAVE (only when no modification keywords/numbers/names are present)
-  const hasModificationCues = /(\d+(\.\d+)?|naam|name|jagah|instead|change|badlo|नाम|जगह|बदलो|लिखो)/iu.test(trimmed);
+  // 2. Check CONFIRM / SAVE (only when no modification/negation keywords/numbers/names are present)
+  const hasModificationCues = /(\d+(\.\d+)?|naam|name|jagah|instead|change|badlo|sahi\s*karo|hua\s*tha|नाम|जगह|बदलो|लिखो|सही\s*करो|हुआ\s*था|नहीं|no\b)/iu.test(trimmed);
   const isConfirm = !hasModificationCues && (
     /(?:^|[\s,।])(?:confirm|confirmed|save|save\s*karo|save\s*kar\s*do|yes|ok|okay|haan|ha|sahi\s*hai|theek\s*hai|thik\s*hai|pakka|kar\s*do|कन्फर्म|कन्फर्म\s*करो|सेव|सेव\s*करो|सेव\s*कर\s*दो|हाँ|हां|सही\s*है|ठीक\s*है|पक्का|कर\s*दो)(?:[\s,।!]|$)/iu.test(trimmed)
   );
@@ -847,6 +853,14 @@ export function parseStagingVoiceFollowUp(rawText = '', stagedDraft = null, cust
     return { action: 'CONFIRM' };
   }
 
+  // Strip leading refusal ("no,", "नहीं,", "गलत है,") & trailing "सही करो / ठीक करो"
+  const strippedCore = trimmed
+    .replace(/^(?:(?:no|nahi|nahin|galat\s*hai|galat|नहीं|ना|गलत\s*है|गलत|अरे\s*नहीं)[,\s।]+)+/iu, '')
+    .replace(/[,\s।]*(?:usko\s+)?(?:sahi\s*karo|sahi\s*kar\s*do|theek\s*karo|thik\s*karo|fix\s*karo|kar\s*do|उसको\s+सही\s+करो|सही\s+करो|सही\s+कर\s+दो|ठीक\s+करो|सुधार\s+करो)[।.,!]*$/iu, '')
+    .trim();
+
+  const normalized = normalizeColloquialQuantities(strippedCore);
+
   // Clone draft for modification
   const updatedDraft = {
     ...stagedDraft,
@@ -854,8 +868,11 @@ export function parseStagingVoiceFollowUp(rawText = '', stagedDraft = null, cust
   };
   let modified = false;
 
-  // 3. Check QUANTITY / ITEM MODIFICATION (e.g. "instead of 4 kg potato, 3.5 kg potato", "4 kilo aloo ki jagah 3.5 kilo aloo")
-  // Strip "instead of <old>," or "<old> ki jagah" so we extract the NEW target quantity
+  // Check if user restated a full "<Customer> का/के/को <Items>" sentence (restructure mode)
+  const customerHeaderMatch = strippedCore.match(/^([\p{L}\p{M}\s]{2,28}?)\s+(?:के\s+खाते\s+में|ke\s+khate\s+mein|के\s+खाते|ke\s+khate|को|ko|का|ka|की|के|ke)(?:\s|$)/iu);
+  const isFullRestatement = Boolean(customerHeaderMatch) && /\d/.test(normalized);
+
+  // 3. Check QUANTITY / ITEM MODIFICATION
   let itemTargetText = normalized
     .replace(/instead\s+of\s+[\d.]+\s*(?:kilo|kg|packet|pkt|nag|liter|ltr|किलो|पैकेट|लीटर)?\s*[\p{L}\p{M}\s]{1,25}?(?:,|and|to|की\s+जगह|$)/giu, ' ')
     .replace(/[\d.]+\s*(?:kilo|kg|packet|pkt|nag|liter|ltr|किलो|पैकेट|लीटर)?\s*[\p{L}\p{M}\s]{1,25}?\s+ki\s+jagah\s+/giu, ' ')
@@ -863,6 +880,7 @@ export function parseStagingVoiceFollowUp(rawText = '', stagedDraft = null, cust
     .trim();
 
   if (/\d/.test(itemTargetText)) {
+    const matchedItems = [];
     for (const rc of rateCard) {
       const searchTerms = [rc.name, rc.displayName, rc.hindiName, ...(rc.aliases || [])].filter(Boolean);
       for (const term of searchTerms) {
@@ -879,26 +897,35 @@ export function parseStagingVoiceFollowUp(rawText = '', stagedDraft = null, cust
           const rawUnit = match[2] || rc.unit || 'kg';
           const newPrice = Math.round(rc.unitPrice * newQty);
 
-          const existingIdx = updatedDraft.items.findIndex(it => it.name.toLowerCase() === rc.name.toLowerCase());
-          if (existingIdx >= 0) {
-            updatedDraft.items[existingIdx] = {
-              ...updatedDraft.items[existingIdx],
-              quantity: `${newQty} ${rawUnit}`.trim(),
-              calculated_price_inr: newPrice,
-              accent_correction_note: null
-            };
-          } else {
-            updatedDraft.items.push({
+          if (!matchedItems.some(it => it.name.toLowerCase() === rc.name.toLowerCase())) {
+            matchedItems.push({
               name: rc.name,
               quantity: `${newQty} ${rawUnit}`.trim(),
               calculated_price_inr: newPrice,
               accent_correction_note: null
             });
           }
-          modified = true;
           break;
         }
       }
+    }
+
+    if (matchedItems.length > 0) {
+      if (isFullRestatement) {
+        // User restated the whole entry ("no, वैशाली का 2 packet तेल हुआ था, उसको सही करो") -> restructure items cleanly!
+        updatedDraft.items = matchedItems;
+      } else {
+        // Targeted edit of specific item(s) -> merge/update inside existing draft items
+        for (const mi of matchedItems) {
+          const existingIdx = updatedDraft.items.findIndex(it => it.name.toLowerCase() === mi.name.toLowerCase());
+          if (existingIdx >= 0) {
+            updatedDraft.items[existingIdx] = mi;
+          } else {
+            updatedDraft.items.push(mi);
+          }
+        }
+      }
+      modified = true;
     }
 
     // Check remove item command (e.g. "aloo hata do" / "remove potato")
@@ -921,12 +948,11 @@ export function parseStagingVoiceFollowUp(rawText = '', stagedDraft = null, cust
   }
 
   // 4. Check CUSTOMER NAME CORRECTION
-  // Examples: "ग्राहक का नाम वैशाली है", "वैशाली लिखो", "by sari nahi Vaishali hai", "it is Vaishali", "वैशाली"
   let correctedName = '';
 
-  const nahiMatch = trimmed.match(/[\p{L}\p{M}\s]{2,25}?\s+(?:nahi|नहीं)\s+([\p{L}\p{M}\s]{2,25}?)(?:\s+(?:hai|हैं|है|likho|लिखो|karo|करो)|[।,.]|$)/iu);
-  const explicitNameMatch = trimmed.match(/(?:ग्राहक\s+का\s+नाम|grahak\s+ka\s+naam|customer\s+name|naam|name|it\s+is)\s+(?:is\s+)?([\p{L}\p{M}\s]{2,25}?)(?:\s+(?:hai|हैं|है|likho|लिखो|लिख\s+दो|karo|कर\s+दो|ya\s+phir|या\s+फिर)|[।,.]|$)/iu);
-  const likhoMatch = trimmed.match(/^([\p{L}\p{M}\s]{2,25}?)\s+(?:लिखो|लिख\s+दो|नाम\s+लिखो|कर\s+दो|likho|likh\s+do)/iu);
+  const nahiMatch = strippedCore.match(/[\p{L}\p{M}\s]{2,25}?\s+(?:nahi|नहीं)\s+([\p{L}\p{M}\s]{2,25}?)(?:\s+(?:hai|हैं|है|likho|लिखो|karo|करो)|[।,.]|$)/iu);
+  const explicitNameMatch = strippedCore.match(/(?:ग्राहक\s+का\s+नाम|grahak\s+ka\s+naam|customer\s+name|naam|name|it\s+is)\s+(?:is\s+)?([\p{L}\p{M}\s]{2,25}?)(?:\s+(?:hai|हैं|है|likho|लिखो|लिख\s+दो|karo|कर\s+दो|ya\s+phir|या\s+फिर)|[।,.]|$)/iu);
+  const likhoMatch = strippedCore.match(/^([\p{L}\p{M}\s]{2,25}?)\s+(?:लिखो|लिख\s+दो|नाम\s+लिखो|कर\s+दो|likho|likh\s+do)/iu);
 
   if (explicitNameMatch) {
     correctedName = explicitNameMatch[1].trim();
@@ -934,16 +960,21 @@ export function parseStagingVoiceFollowUp(rawText = '', stagedDraft = null, cust
     correctedName = nahiMatch[1].trim();
   } else if (likhoMatch) {
     correctedName = likhoMatch[1].trim();
-  } else if (!modified && !/\d/.test(trimmed) && trimmed.split(/\s+/).length <= 3) {
+  } else if (customerHeaderMatch) {
+    // e.g. "वैशाली का 2 packet तेल हुआ था"
+    const cand = customerHeaderMatch[1].trim();
+    if (!/\d/.test(cand) && cand.split(/\s+/).length <= 3) {
+      correctedName = cand;
+    }
+  } else if (!modified && !/\d/.test(strippedCore) && strippedCore.split(/\s+/).length <= 3) {
     // Plain name spoken directly like "वैशाली" or "Ramesh Bhai"
-    correctedName = trimmed.replace(/[।,.!?]+$/g, '').trim();
+    correctedName = strippedCore.replace(/[।,.!?]+$/g, '').trim();
   }
 
   if (correctedName) {
-    // Strip any lingering helper words
     correctedName = correctedName.replace(/^(?:it\s+is|naam|name|ग्राहक|नाम)\s+/iu, '').trim();
     if (correctedName.length >= 2) {
-      const pMatch = matchCustomerPhonetically(correctedName, customers, 0.68);
+      const pMatch = matchCustomerPhonetically(correctedName, customers, 0.65);
       updatedDraft.customer_spoken = correctedName;
       updatedDraft.matched_customer_name = pMatch.isMatch ? pMatch.matchedName : correctedName;
       updatedDraft.matched_customer_id = pMatch.isMatch ? (pMatch.customer?.id || null) : null;

@@ -91,6 +91,10 @@ OPERATIONAL KIRANA DISCOURSE & LEDGER RULES (CRITICAL):
    - "tts_hindi_readback": Clear, natural Devanagari Hindi readback confirming the customer name, items, and total amount, or speaking the direct query answer with exact ledger rupees.
    - "tts_readback": English/Hinglish readback.
 
+7. STAGING DRAFT RESTRUCTURING (DYNAMIC VOICE CORRECTIONS):
+   - When the prompt begins with "CURRENT STAGED DRAFT:", the shopkeeper is correcting or restructuring an unconfirmed draft (e.g. "no, वैशाली का 2 packet तेल हुआ था, उसको सही करो", "instead of 4 kg potato, 3.5 kg potato", "ग्राहक का नाम वैशाली है").
+   - Analyze what changed (customer name, item quantities/units, added/removed/replaced items, or UDHAAR vs JAMA), compute prices from STORE RATE CARD, return the complete restructured JSON ("intent": "CREATE_UDHAAR" or "RECEIVE_JAMA"), and set "tts_hindi_readback" to read the updated draft ending with "क्या इसे सेव करें?".
+
 Respond strictly in valid JSON conforming to this schema:
 {
   "discourse_clauses": [
