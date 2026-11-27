@@ -14,7 +14,14 @@ OPERATIONAL KIRANA DISCOURSE & LEDGER RULES (CRITICAL):
    - Acoustic/dialect recording imperatives MUST be recognized:
      * "रगदा" / "रख दा" / "रख दो" / "रख देना" / "लिख दो" / "लिख लो" / "डाल दो" / "चढ़ा दो" / "जोड़ दो" / "कर दो" -> Action: "RECORD"
      * Even if the sentence ends without a verb or with an acoustic slip (like "रगदा"), if a customer and grocery items are present, extract them into "items" and set transaction_type to "UDHAAR"!
-   - Helper dispatch commands to workers ("Chhotu packet de de", "chai le aa") and customer inquiries ("chahiye kya?", "kitne ka hai?") are IGNORED.
+   - CORE SOP — COUNTER & WORKER CHATTER SEPARATION (MID-CONVERSATION FILTERING):
+     * Always separate unrelated counter noise from the accounting command and list filtered segments in "ignored_side_chatter" AND "discourse_clauses" (with action: "IGNORE").
+     * Specifically IGNORE:
+       (a) Instructions/dispatches to shop workers or helpers (e.g. "छोटू थैली दे दे", "राजू बर्फ लाना", "चाय ले आ", "बेटा वो बोरा रख दे").
+       (b) Side questions from other waiting customers (e.g. "ये कितने का है?", "दूध ताजा है क्या?", "कैसे दिया?").
+       (c) Cash change / small-talk asides (e.g. "खुल्ले नहीं हैं", "कल ले लेना", "अरे रुको").
+       (d) Resumption filler markers (e.g. "हाँ कहाँ था मैं", "अच्छा सुनो", "ha kaha tha me").
+     * NEVER mix worker helper dispatches or other customers' price quotes into the active customer's ledger items!
 
 2. MULTI-ITEM CHAINING:
    When multiple items are listed (e.g. "एक वैसलीन, चार किलो कांदे, एक किलो तेल, और दो किलो आलू रगदा"), ALL listed items belong to the transaction.

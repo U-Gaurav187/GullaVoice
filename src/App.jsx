@@ -28,9 +28,11 @@ import { storage } from './utils/storage.js';
 import { speechTTS } from './utils/speechTTS.js';
 import { matchCustomerPhonetically } from './utils/phoneticMatcher.js';
 import { transcribeWithGroqWhisper, parseWithGroqLlama } from './services/groqService.js';
-import { transcribeWithWisprFlow } from './services/wisprFlowService.js';
-import { parseWithGeminiFlash } from './services/geminiService.js';
-import { parseKiranaVoiceLocally, extractRateCardUpdatesFromText } from './services/localParser.js';
+import {
+  parseKiranaVoiceLocally,
+  extractRateCardUpdatesFromText,
+  parseStagingVoiceFollowUp
+} from './services/localParser.js';
 
 export default function App() {
   // Persistent database states
@@ -76,9 +78,7 @@ export default function App() {
   useEffect(() => { storage.saveSettings(settings); }, [settings]);
 
   const currentLanguage = settings.speechLanguage === 'en' ? 'en' : 'hi';
-  const effectiveWisprKey = settings.wisprFlowApiKey || import.meta.env.VITE_WISPR_FLOW_API_KEY || '';
   const effectiveGroqKey = settings.groqApiKey || import.meta.env.VITE_GROQ_API_KEY || '';
-  const effectiveGeminiKey = settings.geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY || '';
 
   // Aggregate stats (Authoritative net udhaar after deducting jama)
   const grossUdhaar = customers.reduce((sum, c) => sum + (c.totalUdhaar || 0), 0);
@@ -86,64 +86,25 @@ export default function App() {
   const totalUdhaar = Math.max(0, grossUdhaar - totalJama); // Net remaining udhaar after subtracting jama
 
   /**
-   * 1. Voice-to-Text via Wispr Flow API (Official Hackathon STT) or Groq Whisper AI,
-   * followed by multi-model resilient extraction (Llama 3.3 70B / Llama 3.1 8B Instant)
+   * 1. Voice-to-Text via Groq Whisper (/api/transcribe proxy or client key),
+   * followed by Groq AI / zero-key local parser extraction.
    */
   const handleAudioRecorded = async (audioBlob) => {
     setIsProcessing(true);
     speechTTS.stop();
 
     try {
-      console.log('🎙️ Captured audio blob:', audioBlob.size, 'bytes, type:', audioBlob.type);
-
-      let transcript = '';
-
-      // Priority 1: Wispr Flow Voice Interface API (with custom dictionary context)
-      if (effectiveWisprKey) {
-        try {
-          console.log('⚡ Transcribing via Wispr Flow API...');
-          const dictionary = [
-            ...customers.map(c => c.name),
-            ...customers.map(c => c.hindiName),
-            ...customers.flatMap(c => c.aliases || []),
-            ...rateCard.map(r => r.name),
-            ...rateCard.map(r => r.hindiName),
-            'Avinash', 'अविनाश', 'sev', 'सेव', 'seb', 'सेब', 'likh do', 'लिख दो', 'udhaar', 'उधार'
-          ];
-          transcript = await transcribeWithWisprFlow({
-            apiKey: effectiveWisprKey,
-            audioBlob,
-            language: currentLanguage,
-            customDictionary: dictionary
-          });
-          console.log('📝 Wispr Flow Transcription:', transcript);
-        } catch (wisprErr) {
-          console.warn('Wispr Flow STT failed, falling back to Groq Whisper:', wisprErr.message);
-        }
-      }
-
-      // Priority 2 / Fallback: Groq Whisper Large v3 Turbo (or secure serverless proxy)
-      if (!transcript) {
-        try {
-          transcript = await transcribeWithGroqWhisper(
-            effectiveGroqKey, 
-            audioBlob, 
-            currentLanguage
-          );
-          console.log('📝 Groq Whisper Transcription:', transcript);
-        } catch (groqErr) {
-          console.warn('Groq Whisper failed:', groqErr.message);
-          throw groqErr;
-        }
-      }
+      const transcript = await transcribeWithGroqWhisper(
+        effectiveGroqKey,
+        audioBlob,
+        currentLanguage
+      );
 
       if (!transcript || transcript.trim().length === 0) {
         throw new Error('No intelligible speech detected. Please speak closer to the microphone.');
       }
 
       setCurrentTranscript(transcript);
-
-      // Step 2: AI Parsing via Groq AI (with multi-model 70B -> 8B failover)
       await executeAIParser(transcript);
     } catch (err) {
       console.error('Audio processing error:', err);
@@ -209,9 +170,8 @@ export default function App() {
 
     let parsedResult = null;
 
-    // 1. High-Speed Groq Engine (Llama / GPT-OSS 120B or secure serverless proxy)
+    // 1. High-Speed Groq Engine (via Vercel serverless proxy or client key)
     try {
-      console.log('⚡ Processing via Groq Turbo AI Engine (or secure proxy)...');
       parsedResult = await parseWithGroqLlama({
         apiKey: effectiveGroqKey,
         transcript: transcriptText,
@@ -220,28 +180,11 @@ export default function App() {
         language: currentLanguage
       });
     } catch (err) {
-      console.warn('Groq parsing failed, trying Gemini Flash:', err.message);
+      console.warn('Groq parsing failed, falling back to local parser:', err.message);
     }
 
-    // 2. Google Gemini 3.5 Flash if Groq was unavailable or failed
-    if (!parsedResult && effectiveGeminiKey) {
-      try {
-        console.log('⚡ Processing via Google Gemini 3.5 Flash...');
-        parsedResult = await parseWithGeminiFlash({
-          apiKey: effectiveGeminiKey,
-          transcript: transcriptText,
-          customers,
-          rateCard,
-          language: currentLanguage
-        });
-      } catch (err) {
-        console.warn('Gemini parsing error:', err.message);
-      }
-    }
-
-    // 3. Fallback to Local Deterministic Engine
+    // 2. Fallback to Local Deterministic Engine
     if (!parsedResult) {
-      console.log('⚡ Falling back to zero-key local deterministic parser...');
       parsedResult = parseKiranaVoiceLocally(transcriptText, customers, rateCard, transactions);
     }
 
@@ -896,6 +839,134 @@ export default function App() {
     }
   };
 
+  /**
+   * Renames an existing customer across the customer khata and linked transactions,
+   * keeping previous names inside aliases so future voice commands continue to match.
+   */
+  const handleUpdateCustomerName = (customerId, { name, hindiName, upNativeName }) => {
+    setCustomers(prev => prev.map(c => {
+      if (c.id !== customerId) return c;
+      const mergedAliases = Array.from(new Set([
+        ...(c.aliases || []),
+        c.name,
+        c.hindiName,
+        name,
+        hindiName
+      ].filter(Boolean)));
+
+      const updatedCust = {
+        ...c,
+        name,
+        hindiName: hindiName || name,
+        upNativeName: upNativeName !== undefined ? upNativeName : c.upNativeName,
+        aliases: mergedAliases
+      };
+      if (selectedCustomer && selectedCustomer.id === customerId) {
+        setSelectedCustomer(updatedCust);
+      }
+      return updatedCust;
+    }));
+
+    setTransactions(prev => prev.map(t => {
+      if (t.matchedCustomerId !== customerId) return t;
+      return {
+        ...t,
+        customerName: name,
+        customerHindiName: hindiName || name,
+        customerUpName: upNativeName !== undefined ? upNativeName : t.customerUpName
+      };
+    }));
+  };
+
+  /**
+   * Voice/text follow-up on StagingCard: supports "Confirm", "Retry",
+   * customer name corrections ("ग्राहक का नाम वैशाली है", "वैशाली"),
+   * and quantity/item modifications ("instead of 4 kg potato, 3.5 kg potato").
+   */
+  const handleStagingVoiceCommand = async (followUpText) => {
+    if (!stagedDraft || !followUpText || !followUpText.trim()) return;
+    speechTTS.stop();
+
+    const localFollowUp = parseStagingVoiceFollowUp(followUpText, stagedDraft, customers, rateCard);
+    if (localFollowUp?.action === 'CONFIRM') {
+      handleContinue();
+      return;
+    }
+    if (localFollowUp?.action === 'RETRY') {
+      handleRetry();
+      return;
+    }
+    if (localFollowUp?.action === 'UPDATE_DRAFT' && localFollowUp.updatedDraft) {
+      setStagedDraft(localFollowUp.updatedDraft);
+      const readback = currentLanguage === 'hi'
+        ? localFollowUp.updatedDraft.tts_hindi_readback
+        : localFollowUp.updatedDraft.tts_readback;
+      if (settings.autoReadback && readback) {
+        setTimeout(() => speechTTS.speak(readback, currentLanguage), 120);
+      }
+      return;
+    }
+
+    // Fallback to Groq if the user spoke a complex multi-clause edit not handled locally
+    setIsProcessing(true);
+    try {
+      const contextualPrompt = `CURRENT STAGED DRAFT: ${JSON.stringify({
+        customer: stagedDraft.matched_customer_name || stagedDraft.customer_spoken,
+        transaction_type: stagedDraft.transaction_type,
+        items: stagedDraft.items,
+        total_amount_inr: stagedDraft.total_amount_inr
+      })}. USER VOICE CORRECTION: "${followUpText}". Update ONLY the changed customer name or item quantities/prices and return the full updated transaction JSON.`;
+
+      const groqUpdated = await parseWithGroqLlama({
+        apiKey: effectiveGroqKey,
+        transcript: contextualPrompt,
+        customers,
+        rateCard,
+        language: currentLanguage
+      });
+
+      if (groqUpdated && (groqUpdated.matched_customer_name || groqUpdated.customer_spoken)) {
+        const merged = {
+          ...stagedDraft,
+          ...groqUpdated,
+          customer_spoken: groqUpdated.customer_spoken || groqUpdated.matched_customer_name || stagedDraft.customer_spoken,
+          matched_customer_name: groqUpdated.matched_customer_name || groqUpdated.customer_spoken || stagedDraft.matched_customer_name
+        };
+        setStagedDraft(merged);
+        const readback = currentLanguage === 'hi'
+          ? (merged.tts_hindi_readback || merged.tts_readback)
+          : (merged.tts_readback || merged.tts_hindi_readback);
+        if (settings.autoReadback && readback) {
+          setTimeout(() => speechTTS.speak(readback, currentLanguage), 120);
+        }
+      }
+    } catch (err) {
+      console.warn('Staging follow-up edit error:', err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleStagingAudioRecorded = async (audioBlob) => {
+    setIsProcessing(true);
+    speechTTS.stop();
+    try {
+      const transcript = await transcribeWithGroqWhisper(
+        effectiveGroqKey,
+        audioBlob,
+        currentLanguage
+      );
+      if (transcript && transcript.trim()) {
+        await handleStagingVoiceCommand(transcript);
+      }
+    } catch (err) {
+      console.error('Staging audio follow-up error:', err);
+      alert(err.message || 'Could not process voice confirmation.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleLanguageModalSave = ({ language }) => {
     localStorage.setItem('gallavoice_welcome_seen_v1', 'true');
     setSettings(prev => ({
@@ -961,6 +1032,9 @@ export default function App() {
                 stagedDraft={stagedDraft}
                 onRetry={handleRetry}
                 onContinue={handleContinue}
+                onStagingVoiceCommand={handleStagingVoiceCommand}
+                onStagingAudioRecorded={handleStagingAudioRecorded}
+                isProcessing={isProcessing}
                 isTtsSpeaking={isTtsSpeaking}
                 onReplayAudio={handleReplayAudio}
                 language={currentLanguage}
@@ -1022,6 +1096,7 @@ export default function App() {
               customers={customers}
               onSelectCustomer={setSelectedCustomer}
               onOpenPdfReport={() => setIsPdfModalOpen(true)}
+              onUpdateCustomerName={handleUpdateCustomerName}
               language={currentLanguage}
             />
           </div>
@@ -1037,6 +1112,7 @@ export default function App() {
           setSelectedTransaction(null);
           setSelectedCustomer(null);
         }}
+        onUpdateCustomerName={handleUpdateCustomerName}
         language={currentLanguage}
       />
 

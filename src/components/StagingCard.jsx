@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   Check, 
   RotateCcw, 
@@ -9,18 +9,58 @@ import {
   Layers,
   CheckCircle2,
   XCircle,
-  HelpCircle
+  Mic,
+  Square,
+  Send,
+  RefreshCw
 } from 'lucide-react';
+import { audioRecorder } from '../utils/audioRecorder.js';
 
 export default function StagingCard({
   stagedDraft,
   onRetry,
   onContinue,
+  onStagingVoiceCommand,
+  onStagingAudioRecorded,
+  isProcessing = false,
   isTtsSpeaking,
   onReplayAudio,
   language = 'hi'
 }) {
+  const [isRecordingFollowUp, setIsRecordingFollowUp] = useState(false);
+  const [followUpText, setFollowUpText] = useState('');
+  const isTogglingRef = useRef(false);
+
   if (!stagedDraft) return null;
+
+  const handleToggleMic = async () => {
+    if (isProcessing || isTogglingRef.current) return;
+    isTogglingRef.current = true;
+    try {
+      if (isRecordingFollowUp) {
+        setIsRecordingFollowUp(false);
+        const result = await audioRecorder.stop();
+        if (result && result.blob && !result.isSilent && result.durationMs >= 400) {
+          onStagingAudioRecorded && onStagingAudioRecorded(result.blob);
+        }
+      } else {
+        await audioRecorder.start();
+        setIsRecordingFollowUp(true);
+      }
+    } catch (err) {
+      console.error('Staging mic error:', err);
+      setIsRecordingFollowUp(false);
+    } finally {
+      setTimeout(() => { isTogglingRef.current = false; }, 300);
+    }
+  };
+
+  const handleFollowUpSubmit = (e) => {
+    e.preventDefault();
+    if (!followUpText.trim() || isProcessing) return;
+    onStagingVoiceCommand && onStagingVoiceCommand(followUpText.trim());
+    setFollowUpText('');
+  };
 
   const isUdhaar = stagedDraft.transaction_type === 'UDHAAR';
   const readbackText = language === 'hi' 
@@ -228,6 +268,75 @@ export default function StagingCard({
         <p className="text-sm font-semibold text-stone-800 leading-relaxed bg-white/90 p-3 rounded-xl border border-orange-200/60 font-devanagari">
           "{readbackText}"
         </p>
+      </div>
+
+      {/* Voice Confirmation & Live Modification Bar */}
+      <div className="mb-5 p-3.5 rounded-2xl bg-stone-100/80 border border-stone-200 space-y-2.5">
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="font-bold text-stone-800 flex items-center gap-1.5">
+            <Mic className="w-3.5 h-3.5 text-orange-600" />
+            <span>
+              {language === 'hi'
+                ? 'बोलकर पुष्टि करें या सुधारें (Confirm / Edit by Voice):'
+                : 'Voice Confirm or Modify Entry:'}
+            </span>
+          </span>
+          <span className="text-[10px] text-stone-500 hidden sm:inline">
+            "Confirm" • "नाम वैशाली लिखो" • "3.5 kg potato"
+          </span>
+        </div>
+
+        <form onSubmit={handleFollowUpSubmit} className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleToggleMic}
+            disabled={isProcessing}
+            className={`px-3.5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition-all cursor-pointer ${
+              isRecordingFollowUp
+                ? 'bg-red-600 text-white animate-pulse shadow-sm'
+                : isProcessing
+                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                  : 'bg-orange-600 hover:bg-orange-700 text-white shadow-xs'
+            }`}
+            title="बोलकर Confirm करें या नाम/मात्रा बदलें"
+          >
+            {isRecordingFollowUp ? (
+              <>
+                <Square className="w-3.5 h-3.5 fill-white" />
+                <span>{language === 'hi' ? 'रोकें' : 'Stop'}</span>
+              </>
+            ) : isProcessing ? (
+              <>
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>{language === 'hi' ? 'सुन रहा...' : '...'}</span>
+              </>
+            ) : (
+              <>
+                <Mic className="w-3.5 h-3.5" />
+                <span>{language === 'hi' ? 'बोलें' : 'Speak'}</span>
+              </>
+            )}
+          </button>
+
+          <input
+            type="text"
+            value={followUpText}
+            onChange={(e) => setFollowUpText(e.target.value)}
+            placeholder={language === 'hi'
+              ? '"Confirm" या बदलाव लिखें (जैसे: ग्राहक का नाम वैशाली है / 3.5 किलो आलू)...'
+              : 'Say/type "Confirm", "It is Vaishali", or "3.5 kg potato"...'}
+            className="flex-1 text-xs p-2.5 rounded-xl border border-stone-300 bg-white focus:outline-none focus:border-orange-500"
+          />
+
+          <button
+            type="submit"
+            disabled={!followUpText.trim() || isProcessing}
+            className="p-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white disabled:opacity-40 cursor-pointer"
+            title="Apply"
+          >
+            <Send className="w-3.5 h-3.5" />
+          </button>
+        </form>
       </div>
 
       {/* THE MANDATORY TWO GIANT ACTION BUTTONS */}

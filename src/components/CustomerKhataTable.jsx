@@ -8,17 +8,50 @@ import {
   FileText,
   ChevronRight,
   TrendingUp,
-  TrendingDown
+  TrendingDown,
+  Edit2,
+  Check,
+  X
 } from 'lucide-react';
 
 export default function CustomerKhataTable({
   customers = [],
   onSelectCustomer,
   onOpenPdfReport,
+  onUpdateCustomerName,
   language = 'hi'
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedId, setCopiedId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [editHindiName, setEditHindiName] = useState('');
+  const [editUpName, setEditUpName] = useState('');
+
+  const handleStartEdit = (e, customer) => {
+    e.stopPropagation();
+    setEditingId(customer.id);
+    setEditName(customer.name || '');
+    setEditHindiName(customer.hindiName || customer.name || '');
+    setEditUpName(customer.upNativeName || '');
+  };
+
+  const handleSaveEdit = (e, customerId) => {
+    e.stopPropagation();
+    if (editName.trim() && onUpdateCustomerName) {
+      onUpdateCustomerName(customerId, {
+        name: editName.trim(),
+        hindiName: editHindiName.trim() || editName.trim(),
+        upNativeName: editUpName.trim()
+      });
+    }
+    setEditingId(null);
+  };
+
+  const handleCancelEdit = (e) => {
+    e.stopPropagation();
+    setEditingId(null);
+  };
 
   const filtered = customers.filter(c => 
     c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -115,19 +148,77 @@ export default function CustomerKhataTable({
                   >
                     {/* Name */}
                     <td className="py-3.5 px-4">
-                      <div className="font-bold text-stone-900 text-sm flex items-center gap-2">
-                        <span>{customer.name}</span>
-                        <span className="text-[11px] font-devanagari text-stone-500">
-                          ({customer.hindiName || customer.name})
-                        </span>
-                      </div>
+                      {editingId === customer.id ? (
+                        <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="text"
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            placeholder="English Name"
+                            className="w-full px-2 py-1 text-xs font-bold border border-orange-400 rounded-lg bg-white"
+                            autoFocus
+                          />
+                          <input
+                            type="text"
+                            value={editHindiName}
+                            onChange={(e) => setEditHindiName(e.target.value)}
+                            placeholder="हिंदी नाम"
+                            className="w-full px-2 py-1 text-xs border border-stone-300 rounded-lg bg-white"
+                          />
+                        </div>
+                      ) : (
+                        <div className="font-bold text-stone-900 text-sm flex items-center gap-2">
+                          <span>{customer.name}</span>
+                          <span className="text-[11px] font-devanagari text-stone-500">
+                            ({customer.hindiName || customer.name})
+                          </span>
+                          {onUpdateCustomerName && (
+                            <button
+                              type="button"
+                              onClick={(e) => handleStartEdit(e, customer)}
+                              className="p-1 rounded-md text-stone-400 hover:text-orange-600 hover:bg-orange-50 transition-colors cursor-pointer"
+                              title="ग्राहक का नाम बदलें (Rename Customer)"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </td>
 
                     {/* UP Native Name */}
                     <td className="py-3.5 px-4">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-orange-50 text-orange-950 border border-orange-200 font-devanagari font-bold text-xs">
-                        🇮🇳 {customer.upNativeName || 'मान्य ग्राहक'}
-                      </span>
+                      {editingId === customer.id ? (
+                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="text"
+                            value={editUpName}
+                            onChange={(e) => setEditUpName(e.target.value)}
+                            placeholder="देशी नाम (optional)"
+                            className="w-32 px-2 py-1 text-xs border border-stone-300 rounded-lg bg-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={(e) => handleSaveEdit(e, customer.id)}
+                            className="p-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer"
+                            title="सेव करें"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCancelEdit}
+                            className="p-1.5 rounded-lg bg-stone-200 text-stone-700 hover:bg-stone-300 cursor-pointer"
+                            title="रद्द करें"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-orange-50 text-orange-950 border border-orange-200 font-devanagari font-bold text-xs">
+                          🇮🇳 {customer.upNativeName || 'मान्य ग्राहक'}
+                        </span>
+                      )}
                     </td>
 
                     {/* Total Udhaar */}

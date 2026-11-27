@@ -438,7 +438,7 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
   const phoneticMatch = matchCustomerPhonetically(spokenCustomerName, customers, 0.70);
   const matched_customer_name = phoneticMatch.matchedName;
   const match_confidence = phoneticMatch.confidence;
-  const matched_customer_id = phoneticMatch.matchedId;
+  const matched_customer_id = phoneticMatch.customer?.id || null;
 
   // Step 5: Extract Items & Amounts
   const items = [];
@@ -545,24 +545,29 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
 }
 
 /**
- * Extracts item price updates from natural spoken Rate Card commands
+ * Extracts multiple item price updates from text/voice commands (supports comma, newline, "aur", "-", "/")
  */
 export function extractRateCardUpdatesFromText(rawText = '', rateCard = []) {
-  let clean = rawText.replace(/^(?:rate\s*card\s*(?:mein|me|update)?|रेट\s*कार्ड\s*(?:में|अपडेट)?)\s*/iu, '');
-  clean = clean.replace(/(?:kar\s*do|likh\s*do|badal\s*do|update\s*karo|कर\s*दो|लिख\s*दो|बदल\s*दो|अपडेट\s*करो)[.।]?$/iu, '');
+  // Split by newlines or commas first so multi-line / comma lists parse cleanly one item per chunk
+  const normalizedInput = normalizeColloquialQuantities(rawText);
+  let clean = normalizedInput
+    .replace(/^(?:rate\s*card\s*(?:mein|me|update)?|रेट\s*कार्ड\s*(?:में|अपडेट)?)\s*/iu, '')
+    .replace(/(?:kar\s*do|likh\s*do|badal\s*do|update\s*karo|कर\s*दो|लिख\s*दो|बदल\s*दो|अपडेट\s*करो)[.।]?$/iu, '');
 
-  const regex = /([a-zA-Z\u0900-\u097F]+(?:\s+[a-zA-Z\u0900-\u097F]+)?)\s+(?:(?:ka|ke|ki|का|के|की)\s+)?(?:daam|bhav|rate|price|दाम|भाव|रेट|कीमत)?\s*(?:₹|रु|रुपये|rs\.?|inr)?\s*(\d+(?:\.\d+)?)\s*(?:₹|रु|रुपये|rs\.?|rupee|rupees)?\s*(kilo|kg|किलो|pao|pav|पाव|packet|pkt|पैकेट|liter|litre|लीटर|piece|pc|नग)?/giu;
+  const chunks = clean.split(/[\n,;।]+|\s+(?:aur|and|और)\s+/iu).map(c => c.trim()).filter(Boolean);
+  const itemRegex = /^([\p{L}\p{M}\s()]+?)\s*[-:=]?\s*(?:(?:ka|ke|ki|का|के|की)\s+)?(?:daam|bhav|rate|price|दाम|भाव|रेट|कीमत)?\s*(?:₹|रु|रुपये|rs\.?|inr)?\s*[-:=]?\s*(\d+(?:\.\d+)?)\s*(?:₹|रु|रुपये|rs\.?|rupee|rupees)?\s*(?:\/|per|प्रती|प्रति)?\s*(kilo|kg|किलो|pao|pav|पाव|packet|pkt|पैकेट|liter|litre|ltr|लीटर|piece|pc|नग)?$/iu;
+  const fallbackGlobalRegex = /([\p{L}\p{M}]+(?:\s+[\p{L}\p{M}]+)?)\s+(?:(?:ka|ke|ki|का|के|की)\s+)?(?:daam|bhav|rate|price|दाम|भाव|रेट|कीमत)?\s*(?:₹|रु|रुपये|rs\.?|inr)?\s*(\d+(?:\.\d+)?)\s*(?:₹|रु|रुपये|rs\.?|rupee|rupees)?\s*(?:\/|per|प्रति)?\s*(kilo|kg|किलो|pao|pav|पाव|packet|pkt|पैकेट|liter|litre|ltr|लीटर|piece|pc|नग)?/giu;
 
   const updates = [];
-  let m;
-  while ((m = regex.exec(clean)) !== null) {
-    let rawName = m[1].replace(/^(?:aur|and|और)\s+/iu, '').trim();
+  const pushMatch = (rawNameInput, priceStr, rawUnitInput) => {
+    let rawName = (rawNameInput || '').replace(/^(?:aur|and|और)\s+/iu, '').trim();
     rawName = rawName.replace(/\s+(?:ka|ke|ki|का|के|की)$/iu, '').trim();
-    if (/^(?:rate|card|रेट|कार्ड|दाम|भाव|update|karo|करो)$/i.test(rawName)) continue;
+    if (!rawName || /^(?:rate|card|रेट|कार्ड|दाम|भाव|update|karo|करो)$/i.test(rawName)) return;
 
-    let price = parseFloat(m[2]);
-    let rawUnit = (m[3] || 'kg').toLowerCase();
+    const price = parseFloat(priceStr);
+    if (isNaN(price) || price <= 0) return;
 
+    const rawUnit = (rawUnitInput || 'kg').toLowerCase();
     let unit = 'kg';
     let unitLabel = 'किलो';
     if (/पाव|pao|pav/i.test(rawUnit)) { unit = 'pao'; unitLabel = 'पाव'; }
@@ -570,24 +575,196 @@ export function extractRateCardUpdatesFromText(rawText = '', rateCard = []) {
     else if (/लीटर|liter|litre|ltr/i.test(rawUnit)) { unit = 'ltr'; unitLabel = 'लीटर'; }
     else if (/piece|pc|नग/i.test(rawUnit)) { unit = 'pc'; unitLabel = 'नग'; }
 
-    // Match against existing rateCard
     const lower = rawName.toLowerCase();
-    const existing = (rateCard || []).find(rc => 
+    const existing = (rateCard || []).find(rc =>
       rc.name.toLowerCase() === lower ||
       rc.hindiName === rawName ||
       (rc.aliases && rc.aliases.some(a => a.toLowerCase() === lower || lower.includes(a.toLowerCase())))
     );
+
+    if (updates.some(u => u.name.toLowerCase() === (existing ? existing.name : rawName).toLowerCase())) return;
 
     updates.push({
       name: existing ? existing.name : (rawName.charAt(0).toUpperCase() + rawName.slice(1)),
       hindiName: existing ? (existing.hindiName || rawName) : rawName,
       oldPrice: existing ? existing.unitPrice : null,
       newPrice: price,
-      unit: unit,
-      unitLabel: unitLabel,
+      unit,
+      unitLabel,
       isNew: !existing,
       id: existing ? existing.id : `ITEM_${Date.now()}_${updates.length}`
     });
+  };
+
+  for (const chunk of chunks) {
+    const m = chunk.match(itemRegex);
+    if (m) {
+      pushMatch(m[1], m[2], m[3]);
+    } else {
+      let gm;
+      fallbackGlobalRegex.lastIndex = 0;
+      while ((gm = fallbackGlobalRegex.exec(chunk)) !== null) {
+        pushMatch(gm[1], gm[2], gm[3]);
+      }
+    }
   }
+
   return updates;
 }
+
+/**
+ * Parses voice/text confirmation or inline correction commands while viewing the StagingCard.
+ * Supports:
+ * - Voice Confirm ("Confirm", "Haan", "Save karo", "हाँ", "सेव कर दो", "ठीक है")
+ * - Voice Retry/Cancel ("Retry", "Cancel", "गलत है", "नहीं", "दोबारा")
+ * - Voice Name Correction ("ग्राहक का नाम वैशाली है", "वैशाली लिखो", "by sari nahi Vaishali", "वैशाली")
+ * - Voice Quantity/Item Correction ("instead of 4 kg potato, 3.5 kg potato", "आलू 3.5 किलो कर दो")
+ */
+export function parseStagingVoiceFollowUp(rawText = '', stagedDraft = null, customers = [], rateCard = []) {
+  if (!rawText || !rawText.trim() || !stagedDraft) return null;
+
+  const trimmed = rawText.trim();
+  const normalized = normalizeColloquialQuantities(trimmed);
+
+  // 1. Check RETRY / CANCEL (must check negative commands before positive ones)
+  const isRetry = /(?:^|[\s,।])(?:retry|cancel|discard|galat|galat\s*hai|mat\s*karo|dobara|गलत|गलत\s*है|दोबारा|रद्द|मत\s*करो|कैंसल)(?:[\s,।!]|$)/iu.test(trimmed) ||
+    (/^(?:no|nahi|नहीं|ना)$/iu.test(trimmed));
+
+  if (isRetry) {
+    return { action: 'RETRY' };
+  }
+
+  // 2. Check CONFIRM / SAVE (only when no modification keywords/numbers/names are present)
+  const hasModificationCues = /(\d+(\.\d+)?|naam|name|jagah|instead|change|badlo|नाम|जगह|बदलो|लिखो)/iu.test(trimmed);
+  const isConfirm = !hasModificationCues && (
+    /(?:^|[\s,।])(?:confirm|confirmed|save|save\s*karo|save\s*kar\s*do|yes|ok|okay|haan|ha|sahi\s*hai|theek\s*hai|thik\s*hai|pakka|kar\s*do|कन्फर्म|कन्फर्म\s*करो|सेव|सेव\s*करो|सेव\s*कर\s*दो|हाँ|हां|सही\s*है|ठीक\s*है|पक्का|कर\s*दो)(?:[\s,।!]|$)/iu.test(trimmed)
+  );
+
+  if (isConfirm) {
+    return { action: 'CONFIRM' };
+  }
+
+  // Clone draft for modification
+  const updatedDraft = {
+    ...stagedDraft,
+    items: (stagedDraft.items || []).map(it => ({ ...it }))
+  };
+  let modified = false;
+
+  // 3. Check QUANTITY / ITEM MODIFICATION (e.g. "instead of 4 kg potato, 3.5 kg potato", "4 kilo aloo ki jagah 3.5 kilo aloo")
+  // Strip "instead of <old>," or "<old> ki jagah" so we extract the NEW target quantity
+  let itemTargetText = normalized
+    .replace(/instead\s+of\s+[\d.]+\s*(?:kilo|kg|packet|pkt|nag|liter|ltr|किलो|पैकेट|लीटर)?\s*[\p{L}\p{M}\s]{1,25}?(?:,|and|to|की\s+जगह|$)/giu, ' ')
+    .replace(/[\d.]+\s*(?:kilo|kg|packet|pkt|nag|liter|ltr|किलो|पैकेट|लीटर)?\s*[\p{L}\p{M}\s]{1,25}?\s+ki\s+jagah\s+/giu, ' ')
+    .replace(/[\d.]+\s*(?:kilo|kg|packet|pkt|nag|liter|ltr|किलो|पैकेट|लीटर)?\s*[\p{L}\p{M}\s]{1,25}?\s+की\s+जगह\s+/giu, ' ')
+    .trim();
+
+  if (/\d/.test(itemTargetText)) {
+    for (const rc of rateCard) {
+      const searchTerms = [rc.name, rc.displayName, rc.hindiName, ...(rc.aliases || [])].filter(Boolean);
+      for (const term of searchTerms) {
+        const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const beforeRegex = new RegExp(`(\\d+(?:\\.\\d+)?)\\s*(kilo|kg|packet|pkt|nag|l|liter|किलो|पैकेट|लीटर)?\\s*${escaped}`, 'iu');
+        const afterRegex = new RegExp(`${escaped}\\s*(?:ko|को)?\\s*(\\d+(?:\\.\\d+)?)\\s*(kilo|kg|packet|pkt|nag|l|liter|किलो|पैकेट|लीटर)?`, 'iu');
+
+        const mBefore = itemTargetText.match(beforeRegex);
+        const mAfter = itemTargetText.match(afterRegex);
+        const match = mBefore || mAfter;
+
+        if (match) {
+          const newQty = parseFloat(match[1]);
+          const rawUnit = match[2] || rc.unit || 'kg';
+          const newPrice = Math.round(rc.unitPrice * newQty);
+
+          const existingIdx = updatedDraft.items.findIndex(it => it.name.toLowerCase() === rc.name.toLowerCase());
+          if (existingIdx >= 0) {
+            updatedDraft.items[existingIdx] = {
+              ...updatedDraft.items[existingIdx],
+              quantity: `${newQty} ${rawUnit}`.trim(),
+              calculated_price_inr: newPrice,
+              accent_correction_note: null
+            };
+          } else {
+            updatedDraft.items.push({
+              name: rc.name,
+              quantity: `${newQty} ${rawUnit}`.trim(),
+              calculated_price_inr: newPrice,
+              accent_correction_note: null
+            });
+          }
+          modified = true;
+          break;
+        }
+      }
+    }
+
+    // Check remove item command (e.g. "aloo hata do" / "remove potato")
+    if (/(?:hata\s*do|nikal\s*do|remove|delete|हटा\s*दो|निकाल\s*दो)/iu.test(normalized)) {
+      for (const rc of rateCard) {
+        const searchTerms = [rc.name, rc.displayName, rc.hindiName, ...(rc.aliases || [])].filter(Boolean);
+        if (searchTerms.some(t => normalized.toLowerCase().includes(t.toLowerCase()))) {
+          updatedDraft.items = updatedDraft.items.filter(it => it.name.toLowerCase() !== rc.name.toLowerCase());
+          modified = true;
+        }
+      }
+    }
+
+    if (modified && updatedDraft.transaction_type === 'UDHAAR') {
+      updatedDraft.total_amount_inr = updatedDraft.items.reduce((sum, it) => sum + (Number(it.calculated_price_inr) || 0), 0);
+    } else if (modified && updatedDraft.transaction_type === 'JAMA') {
+      const numMatch = itemTargetText.match(/(\d+(?:\.\d+)?)/);
+      if (numMatch) updatedDraft.total_amount_inr = Math.round(parseFloat(numMatch[1]));
+    }
+  }
+
+  // 4. Check CUSTOMER NAME CORRECTION
+  // Examples: "ग्राहक का नाम वैशाली है", "वैशाली लिखो", "by sari nahi Vaishali hai", "it is Vaishali", "वैशाली"
+  let correctedName = '';
+
+  const nahiMatch = trimmed.match(/[\p{L}\p{M}\s]{2,25}?\s+(?:nahi|नहीं)\s+([\p{L}\p{M}\s]{2,25}?)(?:\s+(?:hai|हैं|है|likho|लिखो|karo|करो)|[।,.]|$)/iu);
+  const explicitNameMatch = trimmed.match(/(?:ग्राहक\s+का\s+नाम|grahak\s+ka\s+naam|customer\s+name|naam|name|it\s+is)\s+(?:is\s+)?([\p{L}\p{M}\s]{2,25}?)(?:\s+(?:hai|हैं|है|likho|लिखो|लिख\s+दो|karo|कर\s+दो|ya\s+phir|या\s+फिर)|[।,.]|$)/iu);
+  const likhoMatch = trimmed.match(/^([\p{L}\p{M}\s]{2,25}?)\s+(?:लिखो|लिख\s+दो|नाम\s+लिखो|कर\s+दो|likho|likh\s+do)/iu);
+
+  if (explicitNameMatch) {
+    correctedName = explicitNameMatch[1].trim();
+  } else if (nahiMatch) {
+    correctedName = nahiMatch[1].trim();
+  } else if (likhoMatch) {
+    correctedName = likhoMatch[1].trim();
+  } else if (!modified && !/\d/.test(trimmed) && trimmed.split(/\s+/).length <= 3) {
+    // Plain name spoken directly like "वैशाली" or "Ramesh Bhai"
+    correctedName = trimmed.replace(/[।,.!?]+$/g, '').trim();
+  }
+
+  if (correctedName) {
+    // Strip any lingering helper words
+    correctedName = correctedName.replace(/^(?:it\s+is|naam|name|ग्राहक|नाम)\s+/iu, '').trim();
+    if (correctedName.length >= 2) {
+      const pMatch = matchCustomerPhonetically(correctedName, customers, 0.68);
+      updatedDraft.customer_spoken = correctedName;
+      updatedDraft.matched_customer_name = pMatch.isMatch ? pMatch.matchedName : correctedName;
+      updatedDraft.matched_customer_id = pMatch.isMatch ? (pMatch.customer?.id || null) : null;
+      updatedDraft.match_confidence = pMatch.isMatch ? pMatch.confidence : 1.0;
+      modified = true;
+    }
+  }
+
+  if (!modified) return null;
+
+  // Rebuild Hindi readback for the updated draft
+  const updatedReadback = buildHindiReadback({
+    customerName: updatedDraft.matched_customer_name || updatedDraft.customer_spoken,
+    transactionType: updatedDraft.transaction_type,
+    items: updatedDraft.items,
+    totalAmount: updatedDraft.total_amount_inr
+  });
+
+  updatedDraft.tts_hindi_readback = updatedReadback;
+  updatedDraft.tts_readback = `${updatedDraft.matched_customer_name || updatedDraft.customer_spoken}: ₹${updatedDraft.total_amount_inr} (${updatedDraft.transaction_type}). Confirm to save?`;
+
+  return {
+    action: 'UPDATE_DRAFT',
+    updatedDraft
+  };
+}
+

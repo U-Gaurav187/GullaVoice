@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   Clock, 
@@ -16,7 +16,9 @@ import {
   Share2,
   CheckCircle2,
   Layers,
-  History
+  History,
+  Edit2,
+  Check
 } from 'lucide-react';
 import { speechTTS } from '../utils/speechTTS';
 
@@ -25,8 +27,23 @@ export default function PurchaseDetailModal({
   customer,
   transactions = [],
   onClose,
+  onUpdateCustomerName,
   language = 'hi'
 }) {
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editNameVal, setEditNameVal] = useState('');
+  const [editHindiVal, setEditHindiVal] = useState('');
+  const [editUpVal, setEditUpVal] = useState('');
+
+  useEffect(() => {
+    setIsEditingName(false);
+    if (customer) {
+      setEditNameVal(customer.name || '');
+      setEditHindiVal(customer.hindiName || customer.name || '');
+      setEditUpVal(customer.upNativeName || '');
+    }
+  }, [customer, transaction]);
+
   if (!transaction && !customer) return null;
 
   const isTxnView = Boolean(transaction);
@@ -157,33 +174,99 @@ export default function PurchaseDetailModal({
 
         {/* Modal Scrollable Body */}
         <div className="p-4 sm:p-5 overflow-y-auto space-y-4 text-xs flex-1">
-          {/* Customer Tri-Lingual Name Card (Clean, NO ID, NO Phone number) */}
+          {/* Customer Tri-Lingual Name Card */}
           <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200 flex flex-wrap items-center justify-between gap-3">
-            <div>
+            <div className="flex-1 min-w-[200px]">
               <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider block mb-1">
                 खाताधारक विवरण (Account Holder):
               </span>
-              <div className="space-y-1">
-                <div className="text-base sm:text-lg font-black text-stone-900 flex items-center gap-2">
-                  <span>{activeCustomerName}</span>
-                  <span className="font-devanagari text-stone-600 font-bold">
-                    ({activeHindiName})
-                  </span>
+              {isEditingName && !isTxnView && customer ? (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-1">
+                  <input
+                    type="text"
+                    value={editNameVal}
+                    onChange={(e) => setEditNameVal(e.target.value)}
+                    placeholder="English Name"
+                    className="p-1.5 rounded-lg border border-orange-400 bg-white font-bold text-xs"
+                    autoFocus
+                  />
+                  <input
+                    type="text"
+                    value={editHindiVal}
+                    onChange={(e) => setEditHindiVal(e.target.value)}
+                    placeholder="हिंदी नाम"
+                    className="p-1.5 rounded-lg border border-stone-300 bg-white text-xs"
+                  />
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      value={editUpVal}
+                      onChange={(e) => setEditUpVal(e.target.value)}
+                      placeholder="देशी नाम"
+                      className="flex-1 p-1.5 rounded-lg border border-stone-300 bg-white text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (editNameVal.trim() && onUpdateCustomerName) {
+                          onUpdateCustomerName(customer.id, {
+                            name: editNameVal.trim(),
+                            hindiName: editHindiVal.trim() || editNameVal.trim(),
+                            upNativeName: editUpVal.trim()
+                          });
+                        }
+                        setIsEditingName(false);
+                      }}
+                      className="p-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer"
+                      title="सेव करें"
+                    >
+                      <Check className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingName(false)}
+                      className="p-1.5 rounded-lg bg-stone-200 text-stone-700 hover:bg-stone-300 cursor-pointer"
+                      title="रद्द करें"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
-                {/* UP Native Honorific display */}
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-orange-100/90 text-orange-950 font-semibold text-[11px] border border-orange-200">
-                  <span>🇮🇳 देशी यूपी नाम:</span>
-                  <span className="font-bold">{activeUpName}</span>
+              ) : (
+                <div className="space-y-1">
+                  <div className="text-base sm:text-lg font-black text-stone-900 flex items-center gap-2">
+                    <span>{activeCustomerName}</span>
+                    <span className="font-devanagari text-stone-600 font-bold">
+                      ({activeHindiName})
+                    </span>
+                    {!isTxnView && customer && onUpdateCustomerName && (
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingName(true)}
+                        className="p-1 rounded-lg bg-white/80 hover:bg-white text-stone-500 hover:text-orange-600 border border-amber-200 transition-colors cursor-pointer"
+                        title="ग्राहक का नाम बदलें (Rename Customer)"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  {/* UP Native Honorific display */}
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-orange-100/90 text-orange-950 font-semibold text-[11px] border border-orange-200">
+                    <span>🇮🇳 देशी यूपी नाम:</span>
+                    <span className="font-bold">{activeUpName}</span>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
-                <CheckCircle2 className="w-3.5 h-3.5 text-amber-700" />
-                <span>नियमित ग्राहक</span>
-              </span>
-            </div>
+            {!isEditingName && (
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-700" />
+                  <span>नियमित ग्राहक</span>
+                </span>
+              </div>
+            )}
           </div>
 
           {/* ======================================================== */}

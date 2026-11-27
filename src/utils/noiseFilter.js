@@ -1,76 +1,38 @@
 /**
- * Mid-Sentence "Galla Disturbance" & Side-Chatter Filter
- * Separates ambient cash-counter conversations, price quotes to other buyers,
- * and calls to store helpers from the real accounting ledger command.
+ * Counter Conversation & Worker Chatter Filter (GallaVoice Core SOP)
+ * Separates ambient counter talk, helper/worker instructions, passing price queries,
+ * and resumption markers from the core accounting ledger instruction.
  */
 
-// Common side-chatter, helper calls, and filler patterns at Indian Kirana counters
-export const DISTURBANCE_PATTERNS = [
-  // 1. Price inquiries / quotes to other customers
-  /wo\s+do\s+(rupee|rupaye)\s+ki\s+(he|hai)?/gi,
-  /wo\s+paanch\s+rupaye\s+ka\s+(he|hai)?/gi,
-  /(dudh|doodh)\s+(aab|ab)?\s*\d+\s*ka\s+ho\s+gaya(\s+(he|hai))?/gi,
-  /(dudh|doodh)\s+kal\s+\d+\s+ka\s+ho\s+jayega\s+kya/gi,
-  /(dudh|doodh)\s+khatam\s+ho\s+gaya/gi,
-  /yeh\s+kitne\s+ka\s+(he|hai)/gi,
-  /bhav\s+badh\s+gaya\s+(he|hai)?/gi,
+export const COUNTER_CHATTER_PATTERNS = [
+  // 1. Commands / dispatches to shop helpers & workers (e.g. "छोटू थैली दे दे", "राजू बर्फ लाना")
+  /(?:अरे\s+|ए\s+|ओ\s+)?(?:छोटू|राजू|बबलू|मुन्ना|लड़के|बेटा|मोनू|सोनू|chhotu|raju|bablu|munna|monu|sonu)\s+[\p{L}\p{M}\p{N}\s,]{1,45}?(?:दे\s*दे|दे\s*दो|ला\s*दे|ले\s*आ|लाना|पकड़ा\s*दे|रख\s*दे|बांध\s*दे|तोल\s*दे|निकाल\s*दे|लगा\s*ले|कर\s*दे|de\s*de|de\s*do|le\s*aa|pakda\s*de|rakh\s*de|nikaal|pack\s*kar)/giu,
 
-  // 2. Commands / yells to helpers (Chhotu, Raju, Bablu)
-  /chhotu\s+packet\s+de\s+de/gi,
-  /chhotu\s+packet\s+de/gi,
-  /chhotu\s+baraf\s+le\s+aa\s*(jaldi)?/gi,
-  /chhotu\s+chai\s+le\s+aa\s*(do\s+cup)?/gi,
-  /arre?\s+chhotu\s+jhadu\s+laga\s+le/gi,
-  /chhotu\s+dhyan\s+kidhar\s+hai\s+tera/gi,
-  /chhotu\s+theli\s+de/gi,
-  /raju\s+saman\s+rakh\s+de/gi,
-  /(chhotu|raju|bablu)\s+([a-z0-9\u0900-\u097F\s]+?)\s+(de\s+de|de\s+do|pakda\s+de|pack\s+kar)/gi,
-  /छोटू\s+([a-z0-9\u0900-\u097F\s]+?)\s+(दे\s+दे|दे\s+दो|ले\s+आ)/gi,
+  // 2. General counter helper chores without explicit helper names
+  /(?:जल्दी\s+से\s+)?(?:चाय|पानी|बर्फ|थैली|पन्नी|झाड़ू|डिब्बा|बोरा|chai|paani|baraf|theli|panni)\s+(?:ले\s*आ|ला\s*दो|दे\s*दे|दे\s*दो|रख\s*दे|बांध\s*दे|लगा\s*ले|le\s*aa|de\s*de|de\s*do)/giu,
 
-  // 3. Customer exchange distractions & personal asides
-  /are?\s+bhai\s+khulle\s+nahi\s+hai\s+abhi/gi,
-  /bhaiya\s+change\s+nahi\s+hai\s+abhi/gi,
-  /khulle\s+paise\s+nahi\s+hai/gi,
-  /change\s+do/gi,
-  /chhutte\s+nahi\s+hai/gi,
-  /kal\s+le\s+lena/gi,
-  /kal\s+aana/gi,
-  /are\s+sunita\s+bhabhi\s+kal\s+aana/gi,
-  /baad\s+me\s+aana/gi,
-  /(mummy|मम्मी)\s*,\s*(खाने\s+में\s+क्या\s+बना\s+है|khane\s+mein\s+kya\s+bana\s+hai)/gi,
-  /(mobile|मोबाइल)\s+रख\s*(यार|दे)?/gi,
-  /(मोबाइल|mobile)\s+rakh\s*(yaar|de)?/gi,
-  /(अच्छा|acha)\s*,\s*(और\s+कुछ\s+नहीं\s+है|aur\s+kuch\s+nahi\s+hai)/gi,
-  /([a-z0-9\u0900-\u097F\s]+?)\s+(लेके\s+आएगी\s+क्या|लेक्याना\s+आगे|leke\s+aayegi\s+kya)\s*\??/gi,
+  // 3. Passing customer price inquiries & stock questions (not part of the active khata transaction)
+  /(?:ये|यह|वो|ये\s+वाला|वो\s+वाला|yeh|wo)\s+(?:कितने\s+का|कैसे\s+दिया|क्या\s+रेट|क्या\s+भाव|kitne\s+ka|kaise\s+diya)\s*(?:है|हैं|hai)?/giu,
+  /(?:दही|दूध|ब्रेड|सब्जी|dahi|doodh|dudh|bread)\s+(?:ताजा\s+है\s+क्या|खत्म\s+हो\s+गया|खतम\s+हो\s+गया|kal\s+\d+\s+ka|khatam\s+ho\s+gaya)/giu,
 
-  // 4. Shopkeeper transition & filler hesitation phrases
-  /ha\s+kaha\s+tha\s+me/gi,
-  /kaha\s+the\s+hum/gi,
-  /kaha\s+tha\s+mai/gi,
-  /ha\s+toh\s+kaha\s+the/gi,
-  /are\s+ha\s+suno/gi,
-  /acha\s+suno/gi,
-  /ha\s+suno/gi,
-  /arre?\s+suno/gi,
-  /suno\s+bhai/gi,
-  /bhaiya\s+suno/gi,
-  /are\s+ruko/gi,
-  /are\s+bhai/gi,
-  /(हाँ|हा)\s+कहा\s+था\s+में/gi,
-  /(कहा|कहाँ)\s+था\s+मैं/gi,
-  /कहाँ\s+थे\s+हम/gi,
-  /हाँ\s+सुनो/gi,
-  /अरे\s+सुनो/gi,
-  /अच्छा\s+सुनो/gi,
-  /अरे\s+रुको/gi,
-  /अरे\s+भाई/gi
+  // 4. Cash change / counter exchange small-talk
+  /(?:अरे\s+भाई\s+|भैया\s+)?(?:खुल्ले|चिल्लर|छुट्टे|change|khulle|chhutte|chillar)\s+(?:नहीं\s+हैं?|दो|दे\s+दो|nahi\s+hai|nahi\s+hain|do|de\s+do)/giu,
+  /(?:कल\s+ले\s+लेना|बाद\s+में\s+आना|कल\s+आना|अभी\s+चले\s+जाओ|kal\s+le\s+lena|baad\s+mein?\s+aana|kal\s+aana)/giu,
+
+  // 5. Mid-sentence transition & resumption markers (shopkeeper returning to ledger dictation)
+  /(?:हाँ|हा|अच्छा|अरे)\s*(?:कहाँ|कहा)\s*(?:था|थे)\s*(?:मैं|में|हम)/giu,
+  /(?:कहाँ|कहा)\s*(?:था|थे)\s*(?:मैं|में|हम)/giu,
+  /(?:ha|haan|accha|acha|arre|are)\s*(?:kaha|kahan)\s*(?:tha|the)\s*(?:mai|main|me|hum)/giu,
+  /(?:अरे|अच्छा|हाँ)\s+सुनो/giu,
+  /(?:arre|are|accha|acha|ha|haan)\s+suno/giu,
+  /(?:एक\s+मिनट|रुको\s+जरा|ek\s+minute|are\s+ruko|अरे\s+रुको)/giu
 ];
 
 /**
- * Filter out counter disturbances and side-chatter from spoken text.
- * 
- * @param {string} rawTranscript - The raw transcript from speech recognition
- * @returns {Object} - { cleanedCommand, removedNoiseSegments, ignoredNoiseText, hasNoise }
+ * Splits spoken transcript into clean ledger command and ignored counter chatter.
+ *
+ * @param {string} rawTranscript
+ * @returns {{ cleanedCommand: string, removedNoiseSegments: string[], ignoredNoiseText: string, hasNoise: boolean }}
  */
 export function filterGallaDisturbances(rawTranscript = '') {
   if (!rawTranscript || typeof rawTranscript !== 'string') {
@@ -85,33 +47,28 @@ export function filterGallaDisturbances(rawTranscript = '') {
   let text = rawTranscript.trim();
   const removedSegments = [];
 
-  // Match and strip known disturbance regex patterns
-  for (const pattern of DISTURBANCE_PATTERNS) {
+  for (const pattern of COUNTER_CHATTER_PATTERNS) {
     const matches = text.match(pattern);
     if (matches) {
-      matches.forEach(m => {
+      for (const m of matches) {
         const trimmed = m.trim();
         if (trimmed && !removedSegments.includes(trimmed)) {
           removedSegments.push(trimmed);
         }
-      });
-      // Replace with clean space
+      }
       text = text.replace(pattern, ' ');
     }
   }
 
-  // Clean multiple spaces and dangling punctuation
   const cleanedCommand = text
-    .replace(/[,\.\?]+/g, ' ')
+    .replace(/[,\.\?।]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-
-  const ignoredNoiseText = removedSegments.join(' | ');
 
   return {
     cleanedCommand,
     removedNoiseSegments: removedSegments,
-    ignoredNoiseText,
+    ignoredNoiseText: removedSegments.join(' | '),
     hasNoise: removedSegments.length > 0
   };
 }
