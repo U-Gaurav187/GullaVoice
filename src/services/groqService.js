@@ -23,6 +23,10 @@ OPERATIONAL KIRANA DISCOURSE & LEDGER RULES (CRITICAL):
        (d) Resumption filler markers (e.g. "हाँ कहाँ था मैं", "अच्छा सुनो", "ha kaha tha me").
      * NEVER mix worker helper dispatches or other customers' price quotes into the active customer's ledger items!
 
+1.5. FULL SETTLEMENT & MULTI-CUSTOMER PAYMENT RECEIVED:
+   - Phrases like "<Customer> के खाते में का उधार पैसा आ चुका है", "उधार आ गया", "पैसे मिल गए", "चुकता हो गया", "हिसाब क्लियर" ALWAYS mean payment received ("intent": "RECEIVE_JAMA", "transaction_type": "JAMA"), NEVER "CHECK_BALANCE"!
+   - If two or more customer names are joined with "और" or "and" (e.g. "महीद और रोहिद"), treat them as separate customers, NEVER as one customer named "महीद और रोहिद".
+
 2. MULTI-ITEM CHAINING:
    When multiple items are listed (e.g. "एक वैसलीन, चार किलो कांदे, एक किलो तेल, और दो किलो आलू रगदा"), ALL listed items belong to the transaction.
 

@@ -197,6 +197,24 @@ export default function StagingCard({
         </div>
       )}
 
+      {/* Multi-Customer Settlement Breakdown (if multiple people settled at once) */}
+      {stagedDraft.multi_customers && stagedDraft.multi_customers.length > 0 && (
+        <div className="mb-4 bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-xs">
+          <div className="px-3 py-2 bg-emerald-50 text-[11px] font-bold text-emerald-900 flex justify-between border-b border-emerald-200">
+            <span>{language === 'hi' ? 'ग्राहक अनुसार जमा विवरण (Customers Settled)' : 'Customer Settlement Split'}</span>
+            <span>{language === 'hi' ? 'जमा राशि (₹)' : 'Jama (₹)'}</span>
+          </div>
+          <div className="divide-y divide-stone-100">
+            {stagedDraft.multi_customers.map((mc, idx) => (
+              <div key={idx} className="p-3 flex items-center justify-between text-xs">
+                <span className="font-bold text-stone-900">{mc.hindiName || mc.name}</span>
+                <span className="font-black text-emerald-700 font-mono">₹{mc.amount.toLocaleString('en-IN')}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Items Breakdown Table */}
       {stagedDraft.items && stagedDraft.items.length > 0 ? (
         <div className="mb-4 bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-xs">

@@ -31,7 +31,8 @@ import { transcribeWithGroqWhisper, parseWithGroqLlama } from './services/groqSe
 import {
   parseKiranaVoiceLocally,
   extractRateCardUpdatesFromText,
-  parseStagingVoiceFollowUp
+  parseStagingVoiceFollowUp,
+  parseMultiOrSettlementIntent
 } from './services/localParser.js';
 
 export default function App() {
@@ -389,6 +390,40 @@ export default function App() {
       }
     }
 
+    // Step: Check for Full Settlement / Multi-Customer Payment Received
+    // e.g. "महीद और रोहिद के खाते में का उधार पैसा आ चुका है।"
+    const settlementCheck = parseMultiOrSettlementIntent(
+      transcriptText,
+      customers,
+      parsedResult?.ignored_side_chatter || ''
+    );
+    if (settlementCheck) {
+      if (settlementCheck.transaction_type === 'QUERY') {
+        setStagedDraft(null);
+        setVoiceQueryResult({ ...settlementCheck, rawTranscript: transcriptText });
+        setFilteredNoise(settlementCheck.ignored_side_chatter || '');
+        const msg = currentLanguage === 'hi'
+          ? (settlementCheck.tts_hindi_readback || settlementCheck.tts_readback)
+          : (settlementCheck.tts_readback || settlementCheck.tts_hindi_readback);
+        if (settings.autoReadback && msg) {
+          setTimeout(() => speechTTS.speak(msg, currentLanguage), 150);
+        }
+        return;
+      } else {
+        // Stage the single or multi-customer JAMA settlement directly on StagingCard
+        setVoiceQueryResult(null);
+        setFilteredNoise(settlementCheck.ignored_side_chatter || '');
+        setStagedDraft(settlementCheck);
+        const msg = currentLanguage === 'hi'
+          ? (settlementCheck.tts_hindi_readback || settlementCheck.tts_readback)
+          : (settlementCheck.tts_readback || settlementCheck.tts_hindi_readback);
+        if (settings.autoReadback && msg) {
+          setTimeout(() => speechTTS.speak(msg, currentLanguage), 200);
+        }
+        return;
+      }
+    }
+
     // Step: Check if intent is a 2-Way Conversational Ledger Query
     const isQueryIntent = [
       'CHECK_BALANCE',
@@ -434,6 +469,41 @@ export default function App() {
           else {
             const m2 = cleanedQ.match(/^(.+?)\s+(?:ke|ka|ki|ko|के|का|की|को)\s+/iu);
             if (m2) candidateName = m2[1].trim();
+          }
+        }
+
+        // 0. Check multi-customer query (e.g. "महीद और रोहिद का कितना उधार है?")
+        const multiNames = candidateName
+          ? candidateName.split(/\s+(?:और|एवं|तथा|and|&)\s+|,\s*/iu).map(s => s.trim()).filter(Boolean)
+          : [];
+        if (multiNames.length > 1) {
+          const matchedMulti = multiNames
+            .map(n => matchCustomerPhonetically(n, customers, 0.56))
+            .filter(m => m.isMatch && m.customer)
+            .map(m => m.customer);
+          const uniqueMulti = Array.from(new Map(matchedMulti.map(c => [c.id, c])).values());
+
+          if (uniqueMulti.length > 0) {
+            const combinedNet = uniqueMulti.reduce((s, c) => s + Math.max(0, (c.totalUdhaar || 0) - (c.totalJama || 0)), 0);
+            const partsHi = uniqueMulti.map(c => `${c.hindiName || c.name} (₹${Math.max(0, (c.totalUdhaar || 0) - (c.totalJama || 0)).toLocaleString('en-IN')})`).join(' और ');
+            parsedResult.total_amount_inr = combinedNet;
+            parsedResult.customer_data = uniqueMulti[0];
+            parsedResult.matched_customer_name = uniqueMulti.map(c => c.name).join(' & ');
+            parsedResult.tts_hindi_readback = `${partsHi} का कुल शुद्ध उधार ₹${combinedNet.toLocaleString('en-IN')} बाकी है।`;
+            parsedResult.tts_readback = `Combined net udhaar for ${parsedResult.matched_customer_name} is ₹${combinedNet.toLocaleString('en-IN')}.`;
+            parsedResult.query_answer = {
+              title: `${uniqueMulti.length} ग्राहकों का उधार विवरण`,
+              customerName: parsedResult.matched_customer_name,
+              mainMetric: `₹${combinedNet.toLocaleString('en-IN')}`,
+              metricLabel: 'कुल शुद्ध उधार बाकी',
+              details: partsHi
+            };
+
+            setVoiceQueryResult({ ...parsedResult, rawTranscript: transcriptText });
+            setFilteredNoise(parsedResult.ignored_side_chatter || '');
+            const readbackSentence = currentLanguage === 'hi' ? parsedResult.tts_hindi_readback : parsedResult.tts_readback;
+            if (readbackSentence) setTimeout(() => speechTTS.speak(readbackSentence, currentLanguage), 150);
+            return;
           }
         }
 
@@ -712,6 +782,74 @@ export default function App() {
 
     const txnId = `TXN_${Date.now()}`;
     const nowIso = new Date().toISOString();
+
+    // Multi-customer settlement commit (e.g. "महीद और रोहिद के खाते में का उधार पैसा आ चुका है")
+    if (stagedDraft.multi_customers && stagedDraft.multi_customers.length > 0) {
+      let updatedCustomers = [...customers];
+      const newTxns = [];
+
+      stagedDraft.multi_customers.forEach((mc, idx) => {
+        const amt = Number(mc.amount) || 0;
+        let cIdx = mc.id ? updatedCustomers.findIndex(c => c.id === mc.id) : -1;
+        if (cIdx === -1) {
+          const pm = matchCustomerPhonetically(mc.name, updatedCustomers, 0.56);
+          if (pm.isMatch && pm.customer) {
+            cIdx = updatedCustomers.findIndex(c => c.id === pm.customer.id);
+          }
+        }
+
+        let custId = mc.id;
+        let custName = mc.name;
+        let custHindi = mc.hindiName || mc.name;
+        let custUp = 'मान्य ग्राहक';
+
+        if (cIdx >= 0) {
+          const existing = updatedCustomers[cIdx];
+          const newJama = (existing.totalJama || 0) + amt;
+          updatedCustomers[cIdx] = {
+            ...existing,
+            totalJama: newJama,
+            netBalance: (existing.totalUdhaar || 0) - newJama,
+            lastUpdated: nowIso
+          };
+          custId = existing.id;
+          custName = existing.name;
+          custHindi = existing.hindiName || existing.name;
+          custUp = existing.upNativeName || 'मान्य ग्राहक';
+        }
+
+        newTxns.push({
+          id: `${txnId}_${idx}`,
+          timestamp: nowIso,
+          customerSpoken: mc.name,
+          matchedCustomerId: custId,
+          customerName: custName,
+          customerHindiName: custHindi,
+          customerUpName: custUp,
+          matchConfidence: stagedDraft.match_confidence || 0.95,
+          transactionType: 'JAMA',
+          items: [],
+          totalAmount: amt,
+          ignoredNoise: stagedDraft.ignored_side_chatter || '',
+          rawTranscript: currentTranscript,
+          status: 'COMMITTED',
+          ttsHindiText: stagedDraft.tts_hindi_readback
+        });
+      });
+
+      setCustomers(updatedCustomers);
+      setTransactions([...newTxns, ...transactions]);
+      setNewestTxnId(newTxns[0]?.id || txnId);
+      try { confetti({ particleCount: 65, spread: 70, origin: { y: 0.75 } }); } catch (e) {}
+      setTimeout(() => {
+        speechTTS.speak(currentLanguage === 'hi' ? 'खाता अपडेट हो गया।' : 'Ledger updated successfully.', currentLanguage);
+      }, 150);
+      setStagedDraft(null);
+      setVoiceQueryResult(null);
+      setCurrentTranscript('');
+      setFilteredNoise('');
+      return;
+    }
 
     let targetCustomerId = stagedDraft.matched_customer_id;
     let customerName = stagedDraft.matched_customer_name || stagedDraft.customer_spoken || 'Walk-in Customer';

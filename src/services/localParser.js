@@ -10,6 +10,187 @@ import { matchCustomerPhonetically } from '../utils/phoneticMatcher.js';
 import { checkRateCardSanity } from '../utils/rateCardSanity.js';
 import { buildHindiReadback } from '../utils/hindiDevanagariHelper.js';
 
+/**
+ * Detects full/partial Udhaar settlement ("पैसा आ चुका है", "उधार आ गया", "चुकता हो गया")
+ * and supports multi-customer lists separated by "और" / "and" / "," (e.g. "महीद और रोहिद के खाते में का उधार पैसा आ चुका है").
+ */
+export function parseMultiOrSettlementIntent(rawTranscript = '', customers = [], ignoredNoiseText = '') {
+  if (!rawTranscript || !rawTranscript.trim()) return null;
+
+  const trimmed = rawTranscript.trim();
+  const isSettlement =
+    /(?:पैसा|पैसे|रुपया|रुपये|उधार|रकम|udhaar|udhar|paisa|paise)\s+(?:वापस\s+)?(?:आ\s+चुका|आ\s+चुके|आ\s+गया|आ\s+गए|आ\s+गई|मिल\s+गया|मिल\s+गए|जमा\s+हो\s+गया|aa\s+chuka|aa\s+chuke|aa\s+gaya|aa\s+gaye|mil\s+gaya|mil\s+gaye|wapas\s+aa)/iu.test(trimmed) ||
+    /(?:चुकता|क्लियर|बराबर|chukta|clear|settled?)\s*(?:हो\s*गया|हो\s*गए|कर\s*दो|कर\s*दिया|ho\s*gaya|kar\s*do|kar\s*diya)?/iu.test(trimmed) ||
+    /(?:का|के|की)\s*(?:उधार\s+)?(?:पैसा|पैसे)\s+(?:आ|मिल|दे)\s*(?:चुका|चुके|गया|गए|दिया|दिए)/iu.test(trimmed);
+
+  if (!isSettlement) return null;
+
+  // Check if explicit rupees were spoken
+  const norm = normalizeColloquialQuantities(trimmed);
+  const rupeeMatch = norm.match(/(\d+(?:\.\d+)?)\s*(?:rupaye|rupee|rs|inr|रुपये|रुपए|रु)/iu) || norm.match(/\b(\d+(?:\.\d+)?)\b/);
+  const explicitRupees = rupeeMatch ? Math.round(parseFloat(rupeeMatch[1])) : 0;
+
+  // Isolate the customer(s) phrase before "के खाते", "का उधार", "का पैसा", "को", etc.
+  let custPart = trimmed.replace(/[।.,!?]+$/g, '');
+  custPart = custPart.replace(/^(?:अरे|हाँ|हां|सुनो|भैया|देखो|arre?|are|haan?|suno)\s+/iu, '');
+  const segMatch = custPart.match(/^(.+?)\s+(?:के\s+खाते|ke\s+khate|के\s+खाता|का\s+उधार|के\s+उधार|ka\s+udhaar|के\s+पैसे|का\s+पैसा|के\s+पास\s+का|को|ko|का|ka|के|ke)(?:\s|$)/iu);
+  const rawNamesSegment = segMatch ? segMatch[1].trim() : custPart.split(/\s+/).slice(0, 3).join(' ');
+
+  // Split multi-customers ("महीद और रोहिद", "Ramesh and Suresh", "Vaishali, Pintu")
+  const splitNames = rawNamesSegment
+    .split(/\s+(?:और|एवं|तथा|and|&)\s+|,\s*/iu)
+    .map(n => n.trim())
+    .filter(n => n.length >= 2);
+
+  if (splitNames.length === 0) return null;
+
+  const resolvedList = splitNames.map(spoken => {
+    const pMatch = matchCustomerPhonetically(spoken, customers, 0.56);
+    if (pMatch.isMatch && pMatch.customer) {
+      const cust = pMatch.customer;
+      const net = Math.max(0, (cust.totalUdhaar || 0) - (cust.totalJama || 0));
+      return {
+        matched: true,
+        spoken,
+        customer: cust,
+        confidence: pMatch.confidence,
+        pendingNet: net
+      };
+    }
+    return {
+      matched: false,
+      spoken,
+      customer: null,
+      confidence: 0,
+      pendingNet: 0
+    };
+  });
+
+  const matchedCustomers = resolvedList.filter(r => r.matched);
+
+  // If NO existing customer matched and NO explicit amount was spoken, return helpful multi-name message
+  if (matchedCustomers.length === 0 && explicitRupees === 0) {
+    const nameListStr = splitNames.join(', ');
+    const hindiText = `${nameListStr} का कोई बकाया उधार खाता नहीं मिला। कृपया सही नाम बोलें या नीचे माइक से सुधारें।`;
+    const engText = `No pending udhaar account found for ${nameListStr}.`;
+
+    return {
+      intent: 'CHECK_BALANCE',
+      query_type: 'CUSTOMER_NOT_FOUND',
+      customer_spoken: nameListStr,
+      matched_customer_name: splitNames[0],
+      matched_customer_id: null,
+      match_confidence: 0,
+      total_amount_inr: 0,
+      customer_data: null,
+      items: [],
+      transaction_type: 'QUERY',
+      ignored_side_chatter: ignoredNoiseText,
+      tts_hindi_readback: hindiText,
+      tts_readback: engText,
+      query_answer: {
+        title: 'बकाया खाता नहीं मिला (Not Found)',
+        customerName: nameListStr,
+        mainMetric: '₹0 बकाया',
+        metricLabel: `${splitNames.length} नाम जाँचे गए`,
+        details: 'मौजूदा खातों में इन नामों का कोई उधार बाकी नहीं मिला'
+      }
+    };
+  }
+
+  // Build settlement entries
+  const multiCustomers = [];
+  if (matchedCustomers.length > 0) {
+    for (const r of matchedCustomers) {
+      const amt = explicitRupees > 0 && matchedCustomers.length === 1 ? explicitRupees : r.pendingNet;
+      if (amt > 0) {
+        multiCustomers.push({
+          id: r.customer.id,
+          name: r.customer.name,
+          hindiName: r.customer.hindiName || r.customer.name,
+          amount: amt
+        });
+      }
+    }
+  } else if (explicitRupees > 0) {
+    // Explicit rupee payment spoken for a new/single name
+    multiCustomers.push({
+      id: null,
+      name: splitNames[0],
+      hindiName: splitNames[0],
+      amount: explicitRupees
+    });
+  }
+
+  // If matched customers already have ₹0 balance remaining
+  if (multiCustomers.length === 0) {
+    const namesStr = matchedCustomers.map(r => r.customer.hindiName || r.customer.name).join(' और ');
+    const hindiText = `${namesStr} का कोई उधार बाकी नहीं है, खाता पहले से चुकता है।`;
+    const engText = `${namesStr} already have zero pending udhaar.`;
+
+    return {
+      intent: 'CHECK_BALANCE',
+      query_type: 'CUSTOMER_BALANCE',
+      customer_spoken: rawNamesSegment,
+      matched_customer_name: matchedCustomers[0].customer.name,
+      matched_customer_id: matchedCustomers[0].customer.id,
+      customer_data: matchedCustomers[0].customer,
+      total_amount_inr: 0,
+      items: [],
+      transaction_type: 'QUERY',
+      ignored_side_chatter: ignoredNoiseText,
+      tts_hindi_readback: hindiText,
+      tts_readback: engText,
+      query_answer: {
+        title: 'खाता पहले से चुकता (Settled)',
+        customerName: namesStr,
+        mainMetric: '₹0',
+        metricLabel: 'बाकी बकाया',
+        details: 'इन ग्राहकों का सारा हिसाब पहले ही बराबर है'
+      }
+    };
+  }
+
+  const totalSettlement = multiCustomers.reduce((sum, m) => sum + m.amount, 0);
+
+  if (multiCustomers.length === 1) {
+    const single = multiCustomers[0];
+    const disp = single.hindiName || single.name;
+    return {
+      intent: 'RECEIVE_JAMA',
+      customer_spoken: rawNamesSegment,
+      matched_customer_name: single.name,
+      matched_customer_id: single.id,
+      match_confidence: matchedCustomers[0]?.confidence || 1.0,
+      items: [],
+      total_amount_inr: single.amount,
+      transaction_type: 'JAMA',
+      ignored_side_chatter: ignoredNoiseText,
+      tts_hindi_readback: `${disp} के खाते में बकाया ₹${single.amount} जमा (चुकता)। क्या इसे सेव करें?`,
+      tts_readback: `Settle ₹${single.amount} JAMA for ${single.name}. Confirm to save?`
+    };
+  }
+
+  // Multiple customers settled in one voice command!
+  const summaryParts = multiCustomers.map(m => `${m.hindiName || m.name} (₹${m.amount})`).join(' और ');
+  const combinedName = multiCustomers.map(m => m.name).join(' & ');
+
+  return {
+    intent: 'RECEIVE_JAMA',
+    customer_spoken: rawNamesSegment,
+    matched_customer_name: combinedName,
+    matched_customer_id: null,
+    match_confidence: 0.95,
+    multi_customers: multiCustomers,
+    items: [],
+    total_amount_inr: totalSettlement,
+    transaction_type: 'JAMA',
+    ignored_side_chatter: ignoredNoiseText,
+    tts_hindi_readback: `${summaryParts} के खाते में कुल ₹${totalSettlement} उधार पैसा जमा। क्या इसे सेव करें?`,
+    tts_readback: `Record total ₹${totalSettlement} JAMA across ${multiCustomers.length} customers (${combinedName}). Confirm to save?`
+  };
+}
+
 export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rateCard = [], transactions = []) {
   if (!rawTranscript || !rawTranscript.trim()) {
     return {
@@ -122,6 +303,13 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
         details: 'PDF फाइल स्क्रीन पर खोल दी गई है, आप इसे प्रिंट या सेव कर सकते हैं।'
       }
     };
+  }
+
+  // Step 2.55: Check for Full Settlement / Multi-Customer Payment Received
+  // e.g. "महीद और रोहिद के खाते में का उधार पैसा आ चुका है।"
+  const settlementResult = parseMultiOrSettlementIntent(rawTranscript, customers, ignoredNoiseText);
+  if (settlementResult) {
+    return settlementResult;
   }
 
   // Step 2.6: Check for 2-Way Conversational Ledger Queries
@@ -413,7 +601,7 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
   }
 
   // Step 3: Determine Intent for Transactions (UDHAAR vs JAMA)
-  const isJama = /\b(jama|diye|diya|pay|payment|jama karo|jama kar do|jama likho)\b|जमा|दिए|दिया/i.test(normalizedText);
+  const isJama = /\b(jama|diye|diya|pay|payment|jama karo|jama kar do|jama likho|clear|settle|chukta|aa gaya|aa chuka)\b|जमा|दिए|दिया|आ\s*चुका|आ\s*गया|चुकता|मिल\s*गया/iu.test(normalizedText);
   const isUdhaar = /\b(udhaar|udhar|baaki|baki|khate me|khate mein|likh do|likho|daal do|rakh do|ragda)\b|उधार|खाते में|खाते|लिख दो|रख दो|रगदा|रख दा|डाल दो|चढ़ा दो/i.test(normalizedText);
 
   // Check if it's purely noise without transaction cues
