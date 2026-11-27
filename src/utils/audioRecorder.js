@@ -82,6 +82,105 @@ export class AudioRecorder {
     this.onVolumeChange = null;
     this.startTime = 0;
     this.animFrameId = null;
+    this.vadTimerId = null;
+  }
+
+  /**
+   * Aborts any ongoing recording or hands-free auto-listen without dispatching results.
+   */
+  abort() {
+    if (this.vadTimerId) {
+      clearInterval(this.vadTimerId);
+      this.vadTimerId = null;
+    }
+    if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+      this.mediaRecorder.onstop = null;
+      try { this.mediaRecorder.stop(); } catch (e) {}
+    }
+    this.cleanup();
+  }
+
+  /**
+   * Hands-free Voice Activity Detection (VAD) capture:
+   * Automatically starts listening, detects when the shopkeeper speaks,
+   * waits for silenceMs (1.2s) after they finish, and auto-stops to return the audio blob.
+   */
+  async startAutoListen({
+    onVolume,
+    onSpeechDetected,
+    onAutoComplete,
+    silenceMs = 1200,
+    idleTimeoutMs = 6500,
+    maxDurationMs = 10000
+  } = {}) {
+    this.abort();
+
+    let latestVolume = 0;
+    await this.start((vol) => {
+      latestVolume = vol;
+      if (onVolume) onVolume(vol);
+    });
+
+    if (!this.isRecording) {
+      if (onAutoComplete) onAutoComplete({ timedOut: true });
+      return;
+    }
+
+    const listenStart = Date.now();
+    let ambientSamples = [];
+    let speechThreshold = 14;
+    let consecutiveSpeechFrames = 0;
+    let hasSpoken = false;
+    let lastSpeechTime = Date.now();
+
+    this.vadTimerId = setInterval(async () => {
+      if (!this.isRecording) {
+        clearInterval(this.vadTimerId);
+        this.vadTimerId = null;
+        return;
+      }
+
+      const now = Date.now();
+      const elapsed = now - listenStart;
+
+      // Calibrate baseline ambient noise during first 250ms
+      if (elapsed < 280) {
+        ambientSamples.push(latestVolume);
+        const avgAmbient = ambientSamples.reduce((a, b) => a + b, 0) / ambientSamples.length;
+        speechThreshold = Math.max(10, Math.min(35, avgAmbient + 6));
+        return;
+      }
+
+      if (latestVolume >= speechThreshold) {
+        consecutiveSpeechFrames++;
+        if (consecutiveSpeechFrames >= 2) {
+          if (!hasSpoken) {
+            hasSpoken = true;
+            if (onSpeechDetected) onSpeechDetected();
+          }
+          lastSpeechTime = now;
+        }
+      } else {
+        consecutiveSpeechFrames = 0;
+      }
+
+      // Case 1: User spoke and then paused for silenceMs -> auto-stop and submit!
+      if (hasSpoken && (now - lastSpeechTime >= silenceMs || elapsed >= maxDurationMs)) {
+        clearInterval(this.vadTimerId);
+        this.vadTimerId = null;
+        const res = await this.stop();
+        if (onAutoComplete) onAutoComplete(res || { timedOut: true });
+        return;
+      }
+
+      // Case 2: Nobody spoke within idleTimeoutMs -> cleanly stop without hitting Whisper
+      if (!hasSpoken && elapsed >= idleTimeoutMs) {
+        clearInterval(this.vadTimerId);
+        this.vadTimerId = null;
+        this.abort();
+        if (onAutoComplete) onAutoComplete({ timedOut: true });
+      }
+    }, 80);
   }
 
   async start(onVolume) {
@@ -371,6 +470,10 @@ export class AudioRecorder {
     this.isStarting = false;
     this.isStopping = false;
 
+    if (this.vadTimerId) {
+      clearInterval(this.vadTimerId);
+      this.vadTimerId = null;
+    }
     if (this.animFrameId) {
       cancelAnimationFrame(this.animFrameId);
       this.animFrameId = null;

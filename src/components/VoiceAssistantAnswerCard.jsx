@@ -30,6 +30,8 @@ export default function VoiceAssistantAnswerCard({
   onOpenPdfReport,
   onFollowUpVoiceCommand,
   onFollowUpAudioRecorded,
+  isAutoListening = false,
+  autoListenVolume = 0,
   isProcessing = false,
   language = 'hi'
 }) {
@@ -216,20 +218,35 @@ export default function VoiceAssistantAnswerCard({
         </div>
       )}
 
-      {/* Interactive Follow-Up Voice Mic & Command Bar */}
-      <div className="mb-4 p-3.5 rounded-2xl bg-stone-100/90 border border-stone-200 space-y-2">
+      {/* Interactive Follow-Up Voice Mic & Hands-Free Status */}
+      <div className={`mb-4 p-3.5 rounded-2xl border space-y-2 transition-all ${
+        isAutoListening ? 'bg-emerald-50/90 border-emerald-300' : 'bg-stone-100/90 border-stone-200'
+      }`}>
         <div className="flex items-center justify-between text-[11px]">
           <span className="font-bold text-stone-800 flex items-center gap-1.5">
-            <Mic className="w-3.5 h-3.5 text-orange-600" />
+            {isAutoListening && <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping"></span>}
+            <Mic className={`w-3.5 h-3.5 ${isAutoListening ? 'text-emerald-700' : 'text-orange-600'}`} />
             <span>
-              {isHindi
-                ? 'आगे बोलें या जवाब दें (Continue Talking):'
-                : 'Ask Follow-up or Reply by Voice:'}
+              {isAutoListening
+                ? (isHindi ? 'सुन रहा हूँ... अपना जवाब या अगला सवाल बोलें (Hands-Free)' : 'Listening hands-free... Speak your reply')
+                : (isHindi ? 'आगे बोलें या जवाब दें (Continue Talking):' : 'Ask Follow-up or Reply by Voice:')}
             </span>
           </span>
-          <span className="text-[10px] text-stone-500 hidden sm:inline">
-            "नहीं, कुल उधार बताओ" • "हाँ, खोल दो" • "ठीक है"
-          </span>
+          {isAutoListening ? (
+            <div className="flex items-center gap-0.5 h-4 shrink-0">
+              {[30, 75, 100, 60, 85, 40].map((factor, i) => (
+                <span
+                  key={i}
+                  className="w-1 bg-emerald-600 rounded-full transition-all duration-75"
+                  style={{ height: `${Math.max(4, Math.min(16, Math.round((autoListenVolume / 100) * factor)))}px` }}
+                ></span>
+              ))}
+            </div>
+          ) : (
+            <span className="text-[10px] text-stone-500 hidden sm:inline">
+              "नहीं, कुल उधार बताओ" • "हाँ, खोल दो" • "ठीक है"
+            </span>
+          )}
         </div>
 
         <form onSubmit={handleFollowUpSubmit} className="flex items-center gap-2">

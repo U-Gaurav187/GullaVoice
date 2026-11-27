@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { 
   Check, 
   RotateCcw, 
@@ -10,50 +10,25 @@ import {
   CheckCircle2,
   XCircle,
   Mic,
-  Square,
   Send,
   RefreshCw
 } from 'lucide-react';
-import { audioRecorder } from '../utils/audioRecorder.js';
 
 export default function StagingCard({
   stagedDraft,
   onRetry,
   onContinue,
   onStagingVoiceCommand,
-  onStagingAudioRecorded,
+  isAutoListening = false,
+  autoListenVolume = 0,
   isProcessing = false,
   isTtsSpeaking,
   onReplayAudio,
   language = 'hi'
 }) {
-  const [isRecordingFollowUp, setIsRecordingFollowUp] = useState(false);
   const [followUpText, setFollowUpText] = useState('');
-  const isTogglingRef = useRef(false);
 
   if (!stagedDraft) return null;
-
-  const handleToggleMic = async () => {
-    if (isProcessing || isTogglingRef.current) return;
-    isTogglingRef.current = true;
-    try {
-      if (isRecordingFollowUp) {
-        setIsRecordingFollowUp(false);
-        const result = await audioRecorder.stop();
-        if (result && result.blob && !result.isSilent && result.durationMs >= 400) {
-          onStagingAudioRecorded && onStagingAudioRecorded(result.blob);
-        }
-      } else {
-        await audioRecorder.start();
-        setIsRecordingFollowUp(true);
-      }
-    } catch (err) {
-      console.error('Staging mic error:', err);
-      setIsRecordingFollowUp(false);
-    } finally {
-      setTimeout(() => { isTogglingRef.current = false; }, 300);
-    }
-  };
 
   const handleFollowUpSubmit = (e) => {
     e.preventDefault();
@@ -288,61 +263,68 @@ export default function StagingCard({
         </p>
       </div>
 
-      {/* Voice Confirmation & Live Modification Bar */}
-      <div className="mb-5 p-3.5 rounded-2xl bg-stone-100/80 border border-stone-200 space-y-2.5">
-        <div className="flex items-center justify-between text-[11px]">
-          <span className="font-bold text-stone-800 flex items-center gap-1.5">
-            <Mic className="w-3.5 h-3.5 text-orange-600" />
-            <span>
-              {language === 'hi'
-                ? 'बोलकर पुष्टि करें या सुधारें (Confirm / Edit by Voice):'
-                : 'Voice Confirm or Modify Entry:'}
-            </span>
-          </span>
-          <span className="text-[10px] text-stone-500 hidden sm:inline">
-            "Confirm" • "नाम वैशाली लिखो" • "3.5 kg potato"
-          </span>
-        </div>
-
-        <form onSubmit={handleFollowUpSubmit} className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleToggleMic}
-            disabled={isProcessing}
-            className={`px-3.5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition-all cursor-pointer ${
-              isRecordingFollowUp
-                ? 'bg-red-600 text-white animate-pulse shadow-sm'
-                : isProcessing
-                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                  : 'bg-orange-600 hover:bg-orange-700 text-white shadow-xs'
-            }`}
-            title="बोलकर Confirm करें या नाम/मात्रा बदलें"
-          >
-            {isRecordingFollowUp ? (
+      {/* Hands-Free Two-Way Confirmation Status (No mic button click needed!) */}
+      <div className={`mb-5 p-3.5 rounded-2xl border space-y-2.5 transition-all ${
+        isAutoListening
+          ? 'bg-emerald-50/90 border-emerald-300 shadow-xs'
+          : 'bg-stone-100/80 border-stone-200'
+      }`}>
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 font-bold">
+            {isAutoListening ? (
               <>
-                <Square className="w-3.5 h-3.5 fill-white" />
-                <span>{language === 'hi' ? 'रोकें' : 'Stop'}</span>
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 animate-ping shrink-0"></span>
+                <Mic className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span className="text-emerald-950">
+                  {language === 'hi'
+                    ? 'सुन रहा हूँ... बिना बटन दबाए बोलें "Confirm", "गलत है", या कोई सुधार'
+                    : 'Listening hands-free... Say "Confirm", "Retry", or an edit'}
+                </span>
               </>
             ) : isProcessing ? (
               <>
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>{language === 'hi' ? 'सुन रहा...' : '...'}</span>
+                <RefreshCw className="w-4 h-4 text-orange-600 animate-spin shrink-0" />
+                <span className="text-stone-800">
+                  {language === 'hi' ? 'आपकी पुष्टि समझ रहा हूँ...' : 'Processing your voice reply...'}
+                </span>
+              </>
+            ) : isTtsSpeaking ? (
+              <>
+                <Volume2 className="w-4 h-4 text-orange-600 animate-pulse shrink-0" />
+                <span className="text-stone-800">
+                  {language === 'hi' ? 'पढ़कर सुना रहा हूँ... इसके बाद अपने-आप सुनना शुरू होगा' : 'Reading aloud... Auto-listening starts right after'}
+                </span>
               </>
             ) : (
-              <>
-                <Mic className="w-3.5 h-3.5" />
-                <span>{language === 'hi' ? 'बोलें' : 'Speak'}</span>
-              </>
+              <span className="text-stone-600 text-[11px]">
+                {language === 'hi'
+                  ? 'नीचे बटन दबाएं, "फिर से सुनें" से दोबारा बोलें, या यहाँ टाइप करें:'
+                  : 'Tap Confirm/Retry below, hit Replay to speak hands-free, or type here:'}
+              </span>
             )}
-          </button>
+          </div>
 
+          {isAutoListening && (
+            <div className="flex items-center gap-0.5 h-4 shrink-0">
+              {[30, 75, 100, 60, 85, 40].map((factor, i) => (
+                <span
+                  key={i}
+                  className="w-1 bg-emerald-600 rounded-full transition-all duration-75"
+                  style={{ height: `${Math.max(4, Math.min(16, Math.round((autoListenVolume / 100) * factor)))}px` }}
+                ></span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <form onSubmit={handleFollowUpSubmit} className="flex items-center gap-2">
           <input
             type="text"
             value={followUpText}
             onChange={(e) => setFollowUpText(e.target.value)}
             placeholder={language === 'hi'
-              ? '"Confirm" या बदलाव लिखें (जैसे: ग्राहक का नाम वैशाली है / 3.5 किलो आलू)...'
-              : 'Say/type "Confirm", "It is Vaishali", or "3.5 kg potato"...'}
+              ? 'या लिखकर बदलें (जैसे: Confirm / ग्राहक का नाम वैशाली है / 3.5 किलो आलू)...'
+              : 'Or type "Confirm", "It is Vaishali", "3.5 kg potato"...'}
             className="flex-1 text-xs p-2.5 rounded-xl border border-stone-300 bg-white focus:outline-none focus:border-orange-500"
           />
 

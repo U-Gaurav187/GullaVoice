@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import { 
   Mic, 
@@ -26,6 +26,7 @@ import KhataPdfModal from './components/KhataPdfModal.jsx';
 
 import { storage } from './utils/storage.js';
 import { speechTTS } from './utils/speechTTS.js';
+import { audioRecorder } from './utils/audioRecorder.js';
 import { matchCustomerPhonetically } from './utils/phoneticMatcher.js';
 import { transcribeWithGroqWhisper, parseWithGroqLlama } from './services/groqService.js';
 import {
@@ -49,7 +50,10 @@ export default function App() {
   const [voiceQueryResult, setVoiceQueryResult] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isTtsSpeaking, setIsTtsSpeaking] = useState(false);
+  const [isAutoListening, setIsAutoListening] = useState(false);
+  const [autoListenVolume, setAutoListenVolume] = useState(0);
   const [newestTxnId, setNewestTxnId] = useState(null);
+  const latestHandlersRef = useRef({});
 
   // Tabs & Modals
   const [activeTab, setActiveTab] = useState('VOICE'); // 'VOICE' | 'TRANSACTIONS' | 'CUSTOMERS'
@@ -132,6 +136,8 @@ export default function App() {
   const handleProcessTranscript = async (input) => {
     const text = typeof input === 'string' ? input : input?.spokenText || '';
     if (!text || !text.trim()) return;
+    audioRecorder.abort();
+    setIsAutoListening(false);
     setIsProcessing(true);
     speechTTS.stop();
     setVoiceQueryResult(null);
@@ -418,7 +424,11 @@ export default function App() {
           ? (settlementCheck.tts_hindi_readback || settlementCheck.tts_readback)
           : (settlementCheck.tts_readback || settlementCheck.tts_hindi_readback);
         if (settings.autoReadback && msg) {
-          setTimeout(() => speechTTS.speak(msg, currentLanguage), 200);
+          setTimeout(() => {
+            speechTTS.speak(msg, currentLanguage, () => triggerHandsFreeFollowUp('STAGING'));
+          }, 200);
+        } else {
+          setTimeout(() => triggerHandsFreeFollowUp('STAGING'), 300);
         }
         return;
       }
@@ -707,9 +717,16 @@ export default function App() {
         ? (parsedResult.tts_hindi_readback || parsedResult.tts_readback)
         : (parsedResult.tts_readback || parsedResult.tts_hindi_readback);
 
+      const asksFollowUp = parsedResult.query_type === 'CUSTOMER_NOT_FOUND' ||
+        (readbackSentence && (readbackSentence.includes('?') || readbackSentence.includes('क्या')));
+
       if (readbackSentence) {
         setTimeout(() => {
-          speechTTS.speak(readbackSentence, currentLanguage);
+          speechTTS.speak(
+            readbackSentence,
+            currentLanguage,
+            asksFollowUp ? () => triggerHandsFreeFollowUp('ANSWER') : undefined
+          );
         }, 150);
       }
       return;
@@ -734,37 +751,45 @@ export default function App() {
     } else {
       setStagedDraft(parsedResult);
 
-      // Read back aloud in chosen language (Hindi or English)
+      // Read back aloud in chosen language, then auto-listen hands-free for Confirm/Edit!
       const readbackSentence = currentLanguage === 'hi'
         ? (parsedResult.tts_hindi_readback || parsedResult.tts_readback)
         : (parsedResult.tts_readback || parsedResult.tts_hindi_readback);
 
       if (settings.autoReadback && readbackSentence) {
         setTimeout(() => {
-          speechTTS.speak(readbackSentence, currentLanguage);
+          speechTTS.speak(readbackSentence, currentLanguage, () => {
+            triggerHandsFreeFollowUp('STAGING');
+          });
         }, 250);
+      } else {
+        setTimeout(() => triggerHandsFreeFollowUp('STAGING'), 300);
       }
     }
   };
 
   /**
-   * Replay audio in chosen language
+   * Replay audio in chosen language and re-arm hands-free confirmation listener
    */
   const handleReplayAudio = () => {
     if (!stagedDraft) return;
+    audioRecorder.abort();
+    setIsAutoListening(false);
     const textToSpeak = currentLanguage === 'hi'
       ? (stagedDraft.tts_hindi_readback || stagedDraft.tts_readback)
       : (stagedDraft.tts_readback || stagedDraft.tts_hindi_readback);
 
     if (textToSpeak) {
-      speechTTS.speak(textToSpeak, currentLanguage);
+      speechTTS.speak(textToSpeak, currentLanguage, () => triggerHandsFreeFollowUp('STAGING'));
     }
   };
 
   /**
-   * ❌ RETRY Action: Discards draft, stops speech
+   * ❌ RETRY Action: Discards draft, stops speech & hands-free listener
    */
   const handleRetry = () => {
+    audioRecorder.abort();
+    setIsAutoListening(false);
     speechTTS.stop();
     setStagedDraft(null);
     setVoiceQueryResult(null);
@@ -778,6 +803,8 @@ export default function App() {
   const handleContinue = () => {
     if (!stagedDraft) return;
 
+    audioRecorder.abort();
+    setIsAutoListening(false);
     speechTTS.stop();
 
     const txnId = `TXN_${Date.now()}`;
@@ -1039,6 +1066,8 @@ export default function App() {
    */
   const handleStagingVoiceCommand = async (followUpText) => {
     if (!stagedDraft || !followUpText || !followUpText.trim()) return;
+    audioRecorder.abort();
+    setIsAutoListening(false);
     speechTTS.stop();
 
     const localFollowUp = parseStagingVoiceFollowUp(followUpText, stagedDraft, customers, rateCard);
@@ -1056,7 +1085,9 @@ export default function App() {
         ? localFollowUp.updatedDraft.tts_hindi_readback
         : localFollowUp.updatedDraft.tts_readback;
       if (settings.autoReadback && readback) {
-        setTimeout(() => speechTTS.speak(readback, currentLanguage), 120);
+        setTimeout(() => speechTTS.speak(readback, currentLanguage, () => triggerHandsFreeFollowUp('STAGING')), 120);
+      } else {
+        setTimeout(() => triggerHandsFreeFollowUp('STAGING'), 200);
       }
       return;
     }
@@ -1091,7 +1122,9 @@ export default function App() {
           ? (merged.tts_hindi_readback || merged.tts_readback)
           : (merged.tts_readback || merged.tts_hindi_readback);
         if (settings.autoReadback && readback) {
-          setTimeout(() => speechTTS.speak(readback, currentLanguage), 120);
+          setTimeout(() => speechTTS.speak(readback, currentLanguage, () => triggerHandsFreeFollowUp('STAGING')), 120);
+        } else {
+          setTimeout(() => triggerHandsFreeFollowUp('STAGING'), 200);
         }
       }
     } catch (err) {
@@ -1130,6 +1163,8 @@ export default function App() {
    */
   const handleAnswerCardFollowUp = async (followUpText) => {
     if (!followUpText || !followUpText.trim()) return;
+    audioRecorder.abort();
+    setIsAutoListening(false);
     speechTTS.stop();
     const raw = followUpText.trim();
 
@@ -1221,6 +1256,45 @@ export default function App() {
     }
   };
 
+  /**
+   * Hands-free Voice Activity Detection (VAD) auto-listener activated automatically
+   * after TTS readback completes on StagingCard ("क्या इसे सेव करें?") or AnswerCard questions.
+   */
+  const triggerHandsFreeFollowUp = async (mode) => {
+    if (isProcessing) return;
+    try {
+      setIsAutoListening(true);
+      setAutoListenVolume(0);
+      await audioRecorder.startAutoListen({
+        silenceMs: 1200,
+        idleTimeoutMs: 7000,
+        maxDurationMs: 10000,
+        onVolume: (vol) => setAutoListenVolume(vol),
+        onAutoComplete: async (result) => {
+          setIsAutoListening(false);
+          setAutoListenVolume(0);
+          if (!result || result.timedOut || result.isSilent || !result.blob) {
+            return;
+          }
+          if (mode === 'STAGING' && latestHandlersRef.current.handleStagingAudioRecorded) {
+            await latestHandlersRef.current.handleStagingAudioRecorded(result.blob);
+          } else if (mode === 'ANSWER' && latestHandlersRef.current.handleAnswerCardAudioRecorded) {
+            await latestHandlersRef.current.handleAnswerCardAudioRecorded(result.blob);
+          }
+        }
+      });
+    } catch (err) {
+      console.warn('Hands-free auto-listen skipped:', err.message);
+      setIsAutoListening(false);
+    }
+  };
+
+  // Keep latest handlers synced in ref so async VAD callbacks never use stale state
+  latestHandlersRef.current = {
+    handleStagingAudioRecorded,
+    handleAnswerCardAudioRecorded
+  };
+
   const handleLanguageModalSave = ({ language }) => {
     localStorage.setItem('gallavoice_welcome_seen_v1', 'true');
     setSettings(prev => ({
@@ -1255,36 +1329,59 @@ export default function App() {
             {voiceQueryResult ? (
               <VoiceAssistantAnswerCard
                 queryResult={voiceQueryResult}
-                onClose={() => setVoiceQueryResult(null)}
+                onClose={() => {
+                  audioRecorder.abort();
+                  setIsAutoListening(false);
+                  speechTTS.stop();
+                  setVoiceQueryResult(null);
+                }}
                 onReplayAudio={() => {
+                  audioRecorder.abort();
+                  setIsAutoListening(false);
                   const s = currentLanguage === 'hi'
                     ? (voiceQueryResult.tts_hindi_readback || voiceQueryResult.tts_readback)
                     : (voiceQueryResult.tts_readback || voiceQueryResult.tts_hindi_readback);
-                  if (s) speechTTS.speak(s, currentLanguage);
+                  const asksFollowUp = voiceQueryResult.query_type === 'CUSTOMER_NOT_FOUND' ||
+                    (s && (s.includes('?') || s.includes('क्या')));
+                  if (s) {
+                    speechTTS.speak(s, currentLanguage, asksFollowUp ? () => triggerHandsFreeFollowUp('ANSWER') : undefined);
+                  }
                 }}
                 onViewCustomer={(cust) => {
+                  audioRecorder.abort();
+                  setIsAutoListening(false);
                   setSelectedCustomer(cust);
                   setActiveTab('CUSTOMERS');
                   setVoiceQueryResult(null);
                 }}
                 onViewCustomersList={() => {
+                  audioRecorder.abort();
+                  setIsAutoListening(false);
                   setActiveTab('CUSTOMERS');
                   setVoiceQueryResult(null);
                 }}
                 onViewTransactions={() => {
+                  audioRecorder.abort();
+                  setIsAutoListening(false);
                   setActiveTab('TRANSACTIONS');
                   setVoiceQueryResult(null);
                 }}
                 onViewRateCard={() => {
+                  audioRecorder.abort();
+                  setIsAutoListening(false);
                   setIsRateCardOpen(true);
                   setVoiceQueryResult(null);
                 }}
                 onOpenPdfReport={() => {
+                  audioRecorder.abort();
+                  setIsAutoListening(false);
                   setIsPdfModalOpen(true);
                   setVoiceQueryResult(null);
                 }}
                 onFollowUpVoiceCommand={handleAnswerCardFollowUp}
                 onFollowUpAudioRecorded={handleAnswerCardAudioRecorded}
+                isAutoListening={isAutoListening}
+                autoListenVolume={autoListenVolume}
                 isProcessing={isProcessing}
                 language={currentLanguage}
               />
@@ -1294,7 +1391,8 @@ export default function App() {
                 onRetry={handleRetry}
                 onContinue={handleContinue}
                 onStagingVoiceCommand={handleStagingVoiceCommand}
-                onStagingAudioRecorded={handleStagingAudioRecorded}
+                isAutoListening={isAutoListening}
+                autoListenVolume={autoListenVolume}
                 isProcessing={isProcessing}
                 isTtsSpeaking={isTtsSpeaking}
                 onReplayAudio={handleReplayAudio}
