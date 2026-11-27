@@ -130,7 +130,7 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
   // - "Aaj kitni sale hui?" / "Aaj kitna udhaar hua?"
   // - "Sabse zyada udhaar kiske paas hai?"
   // - "Dukan me kul kitna udhaar hai?"
-  const isQuery = /\b(kitna|kitni|kitne|batao|dikhao|kiske|kiska|kisko|check|hisab|hisaab|balance|sale|bikri|dhandha)\b|कितना|कितनी|कितने|बताओ|दिखाओ|किसका|किसके|किसको|चेक|हिसाब|बैलेंस|सेल|बिक्री|धंधा/i.test(normalizedText);
+  const isQuery = /\b(kitna|kitni|kitne|batao|bata|dikhao|dikha|kiske|kiska|kisko|kaun|check|hisab|hisaab|balance|sale|bikri|dhandha|bacha|bache|baaki|baki)\b|कितना|कितनी|कितने|बताओ|बता(?:\s*(?:दो|दे|2))?|दिखाओ|दिखा|किसका|किसके|किसको|कौन|चेक|हिसाब|बैलेंस|सेल|बिक्री|धंधा|बचा|बची|बचे|बाकी/iu.test(rawTranscript || normalizedText);
 
   // 1. Highest Debtor Query (e.g. "Sabse zyada udhaar kiske paas hai?")
   const isHighestQuery = /(sabse\s+zyada|sabse\s+bada|sabse\s+badi|top|highest)\s*(udhaar|baaki|baki|khata)?/i.test(normalizedText) ||
@@ -217,17 +217,29 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
     };
   }
 
-  // 3. Store Total Outstanding Query (e.g. "Dukan me kul kitna udhaar hai?")
-  const isStoreTotal = /(dukan|store|total|kul|dukaan)\s*(me|mein|ka|ki)?\s*(kul|total)?\s*(kitna|udhaar|baaki|baki|balance)/i.test(normalizedText) ||
-    /(दुकान|स्टोर|कुल|टोटल)\s*(में|का|की)?\s*(कुल|टोटल)?\s*(कितना|उधार|बाकी|बैलेंस)/i.test(normalizedText);
+  // 3. Store Total / All Customers / Self Udhaar Query
+  // Covers: "कितने ग्रहकों का कितना उधार बचा है", "मुझे कितना उधार है", "सबका कितना बाकी है", "Dukan me kul kitna udhaar hai?"
+  const hasStoreOrGroupTerm = /(dukan|dukaan|store|total|kul|grahak|grahakon|grahkon|customer|customers|logon|sabka|sabhi|sab|mujhe|mera|meri|humara|kis\s*kis|kaun\s*kaun)/i.test(normalizedText) ||
+    /(दुकान|स्टोर|कुल|टोटल|ग्राहक|ग्राहकों|ग्रहक|ग्रहकों|कस्टमर|लोगों|सबका|सभी|सब|मुझे|मेरा|मेरी|हमारा|किस[\s-]*किस|कौन[\s-]*कौन)/iu.test(normalizedText);
+  const mentionsMetric = /(udhaar|udhar|baaki|baki|bacha|bache|balance|hisab|hisaab|paisa|paise|lena|उधार|बाकी|बचा|बची|बचे|बैलेंस|हिसाब|पैसा|पैसे|लेना)/iu.test(normalizedText);
+  const explicitPersonalMatch = matchCustomerPhonetically(normalizedText, customers, 0.78);
 
-  if (isQuery && isStoreTotal && !/(khate|khata|bhai|bhabhi|ji)\b/i.test(normalizedText)) {
+  if (isQuery && hasStoreOrGroupTerm && mentionsMetric && !explicitPersonalMatch.isMatch) {
     const grossStoreUdhaar = (customers || []).reduce((sum, c) => sum + (c.totalUdhaar || 0), 0);
     const totalJama = (customers || []).reduce((sum, c) => sum + (c.totalJama || 0), 0);
     const netUdhaar = Math.max(0, grossStoreUdhaar - totalJama);
+    const pendingDebtors = (customers || []).filter(c => ((c.totalUdhaar || 0) - (c.totalJama || 0)) > 0);
+    const pendingCount = pendingDebtors.length;
+    const debtorsBreakdown = pendingDebtors
+      .map(c => `${c.hindiName || c.name} (₹${Math.max(0, (c.totalUdhaar || 0) - (c.totalJama || 0)).toLocaleString('en-IN')})`)
+      .join(', ');
 
-    const tts_hindi_readback = `दुकान में ₹${totalJama} जमा काटकर, अब कुल ${netUdhaar} रुपये उधार बाकी है।`;
-    const tts_readback = `Total store net outstanding udhaar after deducting ₹${totalJama} jama is ₹${netUdhaar}.`;
+    const tts_hindi_readback = pendingCount > 0
+      ? `अभी कुल ${pendingCount} ग्राहकों का ₹${netUdhaar.toLocaleString('en-IN')} उधार बाकी है: ${debtorsBreakdown}।`
+      : `अभी किसी भी ग्राहक का उधार बाकी नहीं है, सभी खाते चुकता हैं।`;
+    const tts_readback = pendingCount > 0
+      ? `Currently ${pendingCount} customer(s) owe a total net udhaar of ₹${netUdhaar}: ${debtorsBreakdown}.`
+      : `No customers currently owe udhaar; all accounts are settled.`;
 
     return {
       intent: 'CHECK_TOTAL_STORE_BALANCE',
@@ -243,9 +255,12 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
       tts_readback,
       query_answer: {
         title: 'दुकान की कुल स्थिति (Store Outstanding)',
+        customerName: `${pendingCount} बाकी ग्राहक (Pending Debtors)`,
         mainMetric: `₹${netUdhaar.toLocaleString('en-IN')}`,
         metricLabel: 'शुद्ध उधार बाकी',
-        details: `कुल उधार: ₹${grossStoreUdhaar.toLocaleString('en-IN')} | कुल जमा: ₹${totalJama.toLocaleString('en-IN')}`
+        details: pendingCount > 0
+          ? `${debtorsBreakdown} | कुल उधार: ₹${grossStoreUdhaar.toLocaleString('en-IN')}, जमा: ₹${totalJama.toLocaleString('en-IN')}`
+          : `कुल उधार: ₹${grossStoreUdhaar.toLocaleString('en-IN')} | कुल जमा: ₹${totalJama.toLocaleString('en-IN')}`
       }
     };
   }

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   Volume2, 
   X, 
@@ -11,24 +11,66 @@ import {
   Users,
   CheckCircle2,
   ShoppingBag,
-  FileText
+  FileText,
+  Mic,
+  Square,
+  Send,
+  RefreshCw
 } from 'lucide-react';
+import { audioRecorder } from '../utils/audioRecorder.js';
 
 export default function VoiceAssistantAnswerCard({
   queryResult,
   onClose,
   onReplayAudio,
   onViewCustomer,
+  onViewCustomersList,
   onViewTransactions,
   onViewRateCard,
   onOpenPdfReport,
+  onFollowUpVoiceCommand,
+  onFollowUpAudioRecorded,
+  isProcessing = false,
   language = 'hi'
 }) {
+  const [isRecordingFollowUp, setIsRecordingFollowUp] = useState(false);
+  const [followUpText, setFollowUpText] = useState('');
+  const isTogglingRef = useRef(false);
+
   if (!queryResult) return null;
 
   const isHindi = language === 'hi';
   const { query_answer, tts_hindi_readback, tts_readback, ignored_side_chatter, customer_data, query_type, rate_card_updates } = queryResult;
   const answerText = isHindi ? (tts_hindi_readback || tts_readback) : (tts_readback || tts_hindi_readback);
+
+  const handleToggleMic = async () => {
+    if (isProcessing || isTogglingRef.current) return;
+    isTogglingRef.current = true;
+    try {
+      if (isRecordingFollowUp) {
+        setIsRecordingFollowUp(false);
+        const result = await audioRecorder.stop();
+        if (result && result.blob && !result.isSilent && result.durationMs >= 400) {
+          onFollowUpAudioRecorded && onFollowUpAudioRecorded(result.blob);
+        }
+      } else {
+        await audioRecorder.start();
+        setIsRecordingFollowUp(true);
+      }
+    } catch (err) {
+      console.error('Answer card mic error:', err);
+      setIsRecordingFollowUp(false);
+    } finally {
+      setTimeout(() => { isTogglingRef.current = false; }, 300);
+    }
+  };
+
+  const handleFollowUpSubmit = (e) => {
+    e.preventDefault();
+    if (!followUpText.trim() || isProcessing) return;
+    onFollowUpVoiceCommand && onFollowUpVoiceCommand(followUpText.trim());
+    setFollowUpText('');
+  };
 
   return (
     <div className="bg-gradient-to-b from-white to-amber-50/40 rounded-3xl p-6 sm:p-7 border-2 border-amber-400/90 shadow-xl relative overflow-hidden transition-all animate-in fade-in zoom-in-95 duration-200 text-left">
@@ -174,9 +216,78 @@ export default function VoiceAssistantAnswerCard({
         </div>
       )}
 
+      {/* Interactive Follow-Up Voice Mic & Command Bar */}
+      <div className="mb-4 p-3.5 rounded-2xl bg-stone-100/90 border border-stone-200 space-y-2">
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="font-bold text-stone-800 flex items-center gap-1.5">
+            <Mic className="w-3.5 h-3.5 text-orange-600" />
+            <span>
+              {isHindi
+                ? 'आगे बोलें या जवाब दें (Continue Talking):'
+                : 'Ask Follow-up or Reply by Voice:'}
+            </span>
+          </span>
+          <span className="text-[10px] text-stone-500 hidden sm:inline">
+            "नहीं, कुल उधार बताओ" • "हाँ, खोल दो" • "ठीक है"
+          </span>
+        </div>
+
+        <form onSubmit={handleFollowUpSubmit} className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleToggleMic}
+            disabled={isProcessing}
+            className={`px-3.5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition-all cursor-pointer ${
+              isRecordingFollowUp
+                ? 'bg-red-600 text-white animate-pulse shadow-sm'
+                : isProcessing
+                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                  : 'bg-orange-600 hover:bg-orange-700 text-white shadow-xs'
+            }`}
+            title="माइक से जवाब दें या अगला सवाल पूछें"
+          >
+            {isRecordingFollowUp ? (
+              <>
+                <Square className="w-3.5 h-3.5 fill-white" />
+                <span>{isHindi ? 'रोकें' : 'Stop'}</span>
+              </>
+            ) : isProcessing ? (
+              <>
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>{isHindi ? 'सुन रहा...' : '...'}</span>
+              </>
+            ) : (
+              <>
+                <Mic className="w-3.5 h-3.5" />
+                <span>{isHindi ? 'बोलें' : 'Speak'}</span>
+              </>
+            )}
+          </button>
+
+          <input
+            type="text"
+            value={followUpText}
+            onChange={(e) => setFollowUpText(e.target.value)}
+            placeholder={isHindi
+              ? 'बोलें या लिखें (जैसे: मुझे कितना उधार है / रमेश को 2 किलो चीनी उधार)...'
+              : 'Reply or ask next question (e.g. total udhaar, Ramesh balance)...'}
+            className="flex-1 text-xs p-2.5 rounded-xl border border-stone-300 bg-white focus:outline-none focus:border-orange-500"
+          />
+
+          <button
+            type="submit"
+            disabled={!followUpText.trim() || isProcessing}
+            className="p-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white disabled:opacity-40 cursor-pointer"
+            title="Send"
+          >
+            <Send className="w-3.5 h-3.5" />
+          </button>
+        </form>
+      </div>
+
       {/* Footer Navigation & Done Buttons */}
-      <div className="flex items-center justify-between gap-2 pt-2 border-t border-stone-200">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-stone-200">
+        <div className="flex flex-wrap items-center gap-2">
           {customer_data && onViewCustomer && (
             <button
               type="button"
@@ -185,6 +296,17 @@ export default function VoiceAssistantAnswerCard({
             >
               <Users className="w-3.5 h-3.5 text-amber-600" />
               <span>{isHindi ? 'पूरा खाता देखें' : 'View Full Ledger'}</span>
+            </button>
+          )}
+
+          {query_type === 'STORE_TOTAL' && onViewCustomersList && (
+            <button
+              type="button"
+              onClick={onViewCustomersList}
+              className="px-3.5 py-2 rounded-xl bg-white hover:bg-stone-50 border border-stone-300 text-stone-800 text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <Users className="w-3.5 h-3.5 text-amber-600" />
+              <span>{isHindi ? 'सभी ग्राहक देखें' : 'All Customers'}</span>
             </button>
           )}
 

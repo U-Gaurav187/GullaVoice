@@ -397,7 +397,7 @@ export default function App() {
       'CHECK_TOTAL_STORE_BALANCE'
     ].includes(parsedResult.intent) || (
       (!parsedResult.items || parsedResult.items.length === 0) &&
-      (/\b(kitna|kitni|kitne|batao|dikhao|kiske|kiska|kisko|check|hisab|hisaab|balance|sale|bikri|dhandha)\b|कितना|कितनी|कितने|बताओ|दिखाओ|किसका|किसके|किसको|चेक|हिसाब|बैलेंस|सेल|बिक्री|धंधा/i.test(transcriptText))
+      (/\b(kitna|kitni|kitne|batao|bata|dikhao|dikha|kiske|kiska|kisko|kaun|check|hisab|hisaab|balance|sale|bikri|dhandha|bacha|bache)\b|कितना|कितनी|कितने|बताओ|बता(?:\s*(?:दो|दे|2))?|दिखाओ|दिखा|किसका|किसके|किसको|कौन|चेक|हिसाब|बैलेंस|सेल|बिक्री|धंधा|बचा|बची|बचे/iu.test(transcriptText))
     );
 
     if (isQueryIntent) {
@@ -406,12 +406,16 @@ export default function App() {
       // Detect specific query type if LLM returned generic query or was mistaken
       let qIntent = parsedResult.intent;
       const normText = transcriptText.toLowerCase();
+      const hasStoreOrGroupTerm = /(dukan|dukaan|store|total|kul|grahak|grahakon|grahkon|customer|customers|logon|sabka|sabhi|sab|mujhe|mera|meri|humara|kis\s*kis|kaun\s*kaun)/i.test(normText) ||
+        /(दुकान|स्टोर|कुल|टोटल|ग्राहक|ग्राहकों|ग्रहक|ग्रहकों|कस्टमर|लोगों|सबका|सभी|सब|मुझे|मेरा|मेरी|हमारा|किस[\s-]*किस|कौन[\s-]*कौन)/iu.test(normText);
+      const mentionsMetric = /(udhaar|udhar|baaki|baki|bacha|bache|balance|hisab|hisaab|paisa|paise|lena|उधार|बाकी|बचा|बची|बचे|बैलेंस|हिसाब|पैसा|पैसे|लेना)/iu.test(normText);
+      const explicitPersonalMatch = matchCustomerPhonetically(transcriptText, customers, 0.78);
 
       if (/(sabse\s+zyada|sabse\s+bada|top|highest)/i.test(normText) || /(सबसे\s+ज्यादा|सबसे\s+बड़ा|टॉप)/i.test(normText)) {
         qIntent = 'CHECK_HIGHEST_UDHAAR';
-      } else if (/(aaj|today|आज)/i.test(normText) && /(sale|bikri|dhandha|hisab|उधार|जमा|सेल|बिक्री)/i.test(normText) && !/(khate|khata|के खाते|का खाता)/i.test(normText)) {
+      } else if (/(aaj|today|आज)/i.test(normText) && /(sale|bikri|dhandha|hisab|उधार|जमा|सेल|बिक्री)/i.test(normText) && !explicitPersonalMatch.isMatch) {
         qIntent = 'CHECK_TODAY_SUMMARY';
-      } else if (/(dukan|store|total|kul|दुकान|स्टोर|कुल)/i.test(normText) && /(kitna|udhaar|balance|उधार|बाकी)/i.test(normText) && !/(khate|khata|के खाते|का खाता)/i.test(normText)) {
+      } else if (hasStoreOrGroupTerm && mentionsMetric && !explicitPersonalMatch.isMatch) {
         qIntent = 'CHECK_TOTAL_STORE_BALANCE';
       } else {
         qIntent = 'CHECK_BALANCE';
@@ -595,15 +599,27 @@ export default function App() {
         const grossStoreUdhaar = (customers || []).reduce((sum, c) => sum + (c.totalUdhaar || 0), 0);
         const storeJama = (customers || []).reduce((sum, c) => sum + (c.totalJama || 0), 0);
         const netStoreUdhaar = Math.max(0, grossStoreUdhaar - storeJama);
+        const pendingDebtors = (customers || []).filter(c => ((c.totalUdhaar || 0) - (c.totalJama || 0)) > 0);
+        const pendingCount = pendingDebtors.length;
+        const debtorsBreakdown = pendingDebtors
+          .map(c => `${c.hindiName || c.name} (₹${Math.max(0, (c.totalUdhaar || 0) - (c.totalJama || 0)).toLocaleString('en-IN')})`)
+          .join(', ');
 
         parsedResult.total_amount_inr = netStoreUdhaar;
-        parsedResult.tts_hindi_readback = `दुकान में ₹${storeJama.toLocaleString('en-IN')} जमा काटकर, अब कुल ₹${netStoreUdhaar.toLocaleString('en-IN')} उधार बाकी है।`;
-        parsedResult.tts_readback = `After deducting ₹${storeJama.toLocaleString('en-IN')} jama, total net store udhaar remaining is ₹${netStoreUdhaar.toLocaleString('en-IN')}.`;
+        parsedResult.tts_hindi_readback = pendingCount > 0
+          ? `अभी कुल ${pendingCount} ग्राहकों का ₹${netStoreUdhaar.toLocaleString('en-IN')} उधार बाकी है: ${debtorsBreakdown}।`
+          : `अभी किसी भी ग्राहक का उधार बाकी नहीं है, सभी खाते चुकता हैं।`;
+        parsedResult.tts_readback = pendingCount > 0
+          ? `Currently ${pendingCount} customer(s) owe a total net udhaar of ₹${netStoreUdhaar.toLocaleString('en-IN')}: ${debtorsBreakdown}.`
+          : `No customers currently owe udhaar; all accounts are settled.`;
         parsedResult.query_answer = {
           title: 'दुकान की कुल स्थिति (Store Outstanding)',
+          customerName: `${pendingCount} बाकी ग्राहक (Pending Debtors)`,
           mainMetric: `₹${netStoreUdhaar.toLocaleString('en-IN')}`,
           metricLabel: 'शुद्ध उधार बाकी',
-          details: `कुल उधार: ₹${grossStoreUdhaar.toLocaleString('en-IN')} | कुल जमा: ₹${storeJama.toLocaleString('en-IN')}`
+          details: pendingCount > 0
+            ? `${debtorsBreakdown} | कुल उधार: ₹${grossStoreUdhaar.toLocaleString('en-IN')}, जमा: ₹${storeJama.toLocaleString('en-IN')}`
+            : `कुल उधार: ₹${grossStoreUdhaar.toLocaleString('en-IN')} | कुल जमा: ₹${storeJama.toLocaleString('en-IN')}`
         };
       }
 
@@ -967,6 +983,106 @@ export default function App() {
     }
   };
 
+  /**
+   * Handles multifunctional voice/text follow-ups directly from VoiceAssistantAnswerCard:
+   * - Close/Done ("ठीक है", "ok", "done")
+   * - Negative-only dismiss ("नहीं") vs Negative + new question ("नहीं, नहीं, मुझे कितना उधार है, ये बता दो इस बार")
+   * - Creating new customer when asked "क्या नया खाता खोलना चाहते हैं?" ("हाँ, खोल दो")
+   * - Any next query, transaction, rate card update, or PDF command
+   */
+  const handleAnswerCardFollowUp = async (followUpText) => {
+    if (!followUpText || !followUpText.trim()) return;
+    speechTTS.stop();
+    const raw = followUpText.trim();
+
+    // 1. Check simple Done / Close
+    if (/^(?:ok|okay|done|close|thik\s*hai|theek\s*hai|ठीक\s*है|बंद\s*करो|बंद|हो\s*गया)[.।!]*$/iu.test(raw)) {
+      setVoiceQueryResult(null);
+      return;
+    }
+
+    // 2. Strip leading refusal ("नहीं, नहीं, मुझे..." -> "मुझे...")
+    const withoutLeadingNo = raw
+      .replace(/^(?:(?:nahi|nahin|no|na|नहीं|ना|अरे\s*नहीं|रहने\s*दो)[,\s।]*)+/iu, '')
+      .trim();
+
+    // If user ONLY said "नहीं" / "No" with nothing after
+    if (!withoutLeadingNo) {
+      setVoiceQueryResult(null);
+      if (settings.autoReadback) {
+        speechTTS.speak(currentLanguage === 'hi' ? 'ठीक है।' : 'Okay.', currentLanguage);
+      }
+      return;
+    }
+
+    // 3. If previous prompt asked "क्या नया खाता खोलना चाहते हैं?" and user says Yes/Create
+    const isYesCreate = /^(?:haan|ha|yes|khol\s*do|banao|bana\s*do|create|हाँ|हां|खोल\s*दो|बना\s*दो|बनाओ|हाँ\s+खोल\s+दो)/iu.test(withoutLeadingNo);
+    if (voiceQueryResult?.query_type === 'CUSTOMER_NOT_FOUND' && isYesCreate && voiceQueryResult.matched_customer_name) {
+      const newCustName = voiceQueryResult.matched_customer_name;
+      const newCustId = `CUST_${String(customers.length + 1).padStart(2, '0')}`;
+      const newCustomer = {
+        id: newCustId,
+        name: newCustName,
+        hindiName: newCustName,
+        aliases: [newCustName],
+        phone: '+91 98000 00000',
+        totalUdhaar: 0,
+        totalJama: 0,
+        netBalance: 0,
+        lastUpdated: new Date().toISOString(),
+        notes: 'Created via GallaVoice'
+      };
+      setCustomers(prev => [...prev, newCustomer]);
+      const msgHi = `${newCustName} का नया खाता खोल दिया गया है। अब आप इनका उधार या जमा बोल सकते हैं।`;
+      const msgEn = `New ledger account created for ${newCustName}. You can now record udhaar or jama for them.`;
+      setVoiceQueryResult({
+        intent: 'CHECK_BALANCE',
+        query_type: 'CUSTOMER_BALANCE',
+        customer_data: newCustomer,
+        matched_customer_name: newCustName,
+        matched_customer_id: newCustId,
+        rawTranscript: raw,
+        tts_hindi_readback: msgHi,
+        tts_readback: msgEn,
+        query_answer: {
+          title: 'नया खाता खोला गया (Account Created)',
+          customerName: newCustName,
+          mainMetric: '₹0',
+          metricLabel: 'खाता खोला गया',
+          details: 'अब आप इनके नाम से उधार या जमा दर्ज कर सकते हैं'
+        }
+      });
+      if (settings.autoReadback) {
+        speechTTS.speak(currentLanguage === 'hi' ? msgHi : msgEn, currentLanguage);
+      }
+      return;
+    }
+
+    // 4. Otherwise, pass cleanly (with any leading "नहीं, नहीं" stripped) to full voice processor!
+    await handleProcessTranscript(withoutLeadingNo);
+  };
+
+  const handleAnswerCardAudioRecorded = async (audioBlob) => {
+    setIsProcessing(true);
+    speechTTS.stop();
+    try {
+      const transcript = await transcribeWithGroqWhisper(
+        effectiveGroqKey,
+        audioBlob,
+        currentLanguage
+      );
+      if (transcript && transcript.trim()) {
+        setCurrentTranscript(transcript);
+        await handleAnswerCardFollowUp(transcript);
+      }
+    } catch (err) {
+      console.error('Answer card follow-up audio error:', err);
+      alert(err.message || 'Could not process voice follow-up.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleLanguageModalSave = ({ language }) => {
     localStorage.setItem('gallavoice_welcome_seen_v1', 'true');
     setSettings(prev => ({
@@ -1013,6 +1129,10 @@ export default function App() {
                   setActiveTab('CUSTOMERS');
                   setVoiceQueryResult(null);
                 }}
+                onViewCustomersList={() => {
+                  setActiveTab('CUSTOMERS');
+                  setVoiceQueryResult(null);
+                }}
                 onViewTransactions={() => {
                   setActiveTab('TRANSACTIONS');
                   setVoiceQueryResult(null);
@@ -1025,6 +1145,9 @@ export default function App() {
                   setIsPdfModalOpen(true);
                   setVoiceQueryResult(null);
                 }}
+                onFollowUpVoiceCommand={handleAnswerCardFollowUp}
+                onFollowUpAudioRecorded={handleAnswerCardAudioRecorded}
+                isProcessing={isProcessing}
                 language={currentLanguage}
               />
             ) : stagedDraft ? (
