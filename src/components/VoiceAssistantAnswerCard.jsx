@@ -32,6 +32,7 @@ export default function VoiceAssistantAnswerCard({
   onFollowUpAudioRecorded,
   isAutoListening = false,
   autoListenVolume = 0,
+  onFinishAutoListenNow,
   isProcessing = false,
   language = 'hi'
 }) {
@@ -233,14 +234,25 @@ export default function VoiceAssistantAnswerCard({
             </span>
           </span>
           {isAutoListening ? (
-            <div className="flex items-center gap-0.5 h-4 shrink-0">
-              {[30, 75, 100, 60, 85, 40].map((factor, i) => (
-                <span
-                  key={i}
-                  className="w-1 bg-emerald-600 rounded-full transition-all duration-75"
-                  style={{ height: `${Math.max(4, Math.min(16, Math.round((autoListenVolume / 100) * factor)))}px` }}
-                ></span>
-              ))}
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-0.5 h-4">
+                {[30, 75, 100, 60, 85, 40].map((factor, i) => (
+                  <span
+                    key={i}
+                    className="w-1 bg-emerald-600 rounded-full transition-all duration-75"
+                    style={{ height: `${Math.max(4, Math.min(16, Math.round((autoListenVolume / 100) * factor)))}px` }}
+                  ></span>
+                ))}
+              </div>
+              {onFinishAutoListenNow && (
+                <button
+                  type="button"
+                  onClick={onFinishAutoListenNow}
+                  className="px-2 py-0.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[10px] font-bold cursor-pointer"
+                >
+                  {isHindi ? 'भेजें' : 'Send'}
+                </button>
+              )}
             </div>
           ) : (
             <span className="text-[10px] text-stone-500 hidden sm:inline">

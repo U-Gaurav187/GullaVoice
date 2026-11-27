@@ -1190,6 +1190,7 @@ export default function App() {
         audioBlob,
         currentLanguage
       );
+      console.log('🗣️ Staging follow-up heard:', transcript);
       if (transcript && transcript.trim()) {
         await handleStagingVoiceCommand(transcript);
       }
@@ -1291,6 +1292,7 @@ export default function App() {
         audioBlob,
         currentLanguage
       );
+      console.log('🗣️ Answer card follow-up heard:', transcript);
       if (transcript && transcript.trim()) {
         setCurrentTranscript(transcript);
         await handleAnswerCardFollowUp(transcript);
@@ -1310,12 +1312,13 @@ export default function App() {
   const triggerHandsFreeFollowUp = async (mode) => {
     if (isProcessing) return;
     try {
+      console.log(`🎙️ Hands-free auto-listen started (${mode})`);
       setIsAutoListening(true);
       setAutoListenVolume(0);
       await audioRecorder.startAutoListen({
-        silenceMs: 1200,
+        silenceMs: 1000,
         idleTimeoutMs: 7000,
-        maxDurationMs: 10000,
+        maxDurationMs: 9000,
         onVolume: (vol) => setAutoListenVolume(vol),
         onAutoComplete: async (result) => {
           setIsAutoListening(false);
@@ -1429,6 +1432,7 @@ export default function App() {
                 onFollowUpAudioRecorded={handleAnswerCardAudioRecorded}
                 isAutoListening={isAutoListening}
                 autoListenVolume={autoListenVolume}
+                onFinishAutoListenNow={() => audioRecorder.finishAutoListenNow()}
                 isProcessing={isProcessing}
                 language={currentLanguage}
               />
@@ -1440,6 +1444,7 @@ export default function App() {
                 onStagingVoiceCommand={handleStagingVoiceCommand}
                 isAutoListening={isAutoListening}
                 autoListenVolume={autoListenVolume}
+                onFinishAutoListenNow={() => audioRecorder.finishAutoListenNow()}
                 isProcessing={isProcessing}
                 isTtsSpeaking={isTtsSpeaking}
                 onReplayAudio={handleReplayAudio}

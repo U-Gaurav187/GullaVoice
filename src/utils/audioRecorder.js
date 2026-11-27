@@ -83,12 +83,32 @@ export class AudioRecorder {
     this.startTime = 0;
     this.animFrameId = null;
     this.vadTimerId = null;
+    this.vadCompleteCallback = null;
+  }
+
+  /**
+   * Immediately finishes active hands-free auto-listen and submits recorded audio.
+   */
+  async finishAutoListenNow() {
+    if (this.vadTimerId) {
+      clearInterval(this.vadTimerId);
+      this.vadTimerId = null;
+    }
+    const cb = this.vadCompleteCallback;
+    this.vadCompleteCallback = null;
+    if (!this.isRecording) {
+      if (cb) cb({ timedOut: true });
+      return;
+    }
+    const res = await this.stop();
+    if (cb) cb(res || { timedOut: true });
   }
 
   /**
    * Aborts any ongoing recording or hands-free auto-listen without dispatching results.
    */
   abort() {
+    this.vadCompleteCallback = null;
     if (this.vadTimerId) {
       clearInterval(this.vadTimerId);
       this.vadTimerId = null;
@@ -103,17 +123,18 @@ export class AudioRecorder {
   /**
    * Hands-free Voice Activity Detection (VAD) capture:
    * Automatically starts listening, detects when the shopkeeper speaks,
-   * waits for silenceMs (1.2s) after they finish, and auto-stops to return the audio blob.
+   * waits for silenceMs (1.0s) after they finish, and auto-stops to return the audio blob.
    */
   async startAutoListen({
     onVolume,
     onSpeechDetected,
     onAutoComplete,
-    silenceMs = 1200,
-    idleTimeoutMs = 6500,
-    maxDurationMs = 10000
+    silenceMs = 1000,
+    idleTimeoutMs = 7000,
+    maxDurationMs = 9000
   } = {}) {
     this.abort();
+    this.vadCompleteCallback = onAutoComplete || null;
 
     let latestVolume = 0;
     await this.start((vol) => {
@@ -122,13 +143,15 @@ export class AudioRecorder {
     });
 
     if (!this.isRecording) {
-      if (onAutoComplete) onAutoComplete({ timedOut: true });
+      const cb = this.vadCompleteCallback;
+      this.vadCompleteCallback = null;
+      if (cb) cb({ timedOut: true });
       return;
     }
 
     const listenStart = Date.now();
     let ambientSamples = [];
-    let speechThreshold = 14;
+    let speechThreshold = 15;
     let consecutiveSpeechFrames = 0;
     let hasSpoken = false;
     let lastSpeechTime = Date.now();
@@ -143,11 +166,11 @@ export class AudioRecorder {
       const now = Date.now();
       const elapsed = now - listenStart;
 
-      // Calibrate baseline ambient noise during first 250ms
-      if (elapsed < 280) {
+      // Fast 160ms baseline room noise calibration
+      if (elapsed < 160) {
         ambientSamples.push(latestVolume);
         const avgAmbient = ambientSamples.reduce((a, b) => a + b, 0) / ambientSamples.length;
-        speechThreshold = Math.max(10, Math.min(35, avgAmbient + 6));
+        speechThreshold = Math.max(12, Math.min(45, avgAmbient + 9));
         return;
       }
 
@@ -168,8 +191,10 @@ export class AudioRecorder {
       if (hasSpoken && (now - lastSpeechTime >= silenceMs || elapsed >= maxDurationMs)) {
         clearInterval(this.vadTimerId);
         this.vadTimerId = null;
+        const cb = this.vadCompleteCallback;
+        this.vadCompleteCallback = null;
         const res = await this.stop();
-        if (onAutoComplete) onAutoComplete(res || { timedOut: true });
+        if (cb) cb(res || { timedOut: true });
         return;
       }
 
@@ -177,8 +202,10 @@ export class AudioRecorder {
       if (!hasSpoken && elapsed >= idleTimeoutMs) {
         clearInterval(this.vadTimerId);
         this.vadTimerId = null;
+        const cb = this.vadCompleteCallback;
+        this.vadCompleteCallback = null;
         this.abort();
-        if (onAutoComplete) onAutoComplete({ timedOut: true });
+        if (cb) cb({ timedOut: true });
       }
     }, 80);
   }

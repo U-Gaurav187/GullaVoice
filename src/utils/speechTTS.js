@@ -85,32 +85,51 @@ class SpeechTTSManager {
     utterance.rate = 0.95; // Clear articulation
     utterance.pitch = 1.0;
 
+    let completed = false;
+    let safetyTimer = null;
+    const finishOnce = () => {
+      if (completed) return;
+      completed = true;
+      if (safetyTimer) clearTimeout(safetyTimer);
+      this.isSpeaking = false;
+      if (this.onStateChange) this.onStateChange(false);
+      if (onComplete) {
+        // Brief 350ms gap prevents laptop speaker echo from bleeding into hands-free mic
+        setTimeout(() => onComplete(), 350);
+      }
+    };
+
     utterance.onstart = () => {
       this.isSpeaking = true;
       if (this.onStateChange) this.onStateChange(true);
     };
 
-    utterance.onend = () => {
-      this.isSpeaking = false;
-      if (this.onStateChange) this.onStateChange(false);
-      if (onComplete) onComplete();
-    };
+    utterance.onend = () => finishOnce();
 
     utterance.onerror = (e) => {
-      // 'interrupted' or 'canceled' happens normally in Chromium when stopping previous audio
       if (e.error === 'interrupted' || e.error === 'canceled') {
+        completed = true;
+        if (safetyTimer) clearTimeout(safetyTimer);
         this.isSpeaking = false;
         if (this.onStateChange) this.onStateChange(false);
         return;
       }
       console.warn('SpeechSynthesis notice:', e.error || e);
-      this.isSpeaking = false;
-      if (this.onStateChange) this.onStateChange(false);
-      if (onComplete) onComplete();
+      finishOnce();
     };
 
     this.currentUtterance = utterance;
-    // 50ms delay lets Chromium audio output channel completely reset after cancel()
+    // Retain strong reference to prevent Chromium GC from killing onend mid-speech
+    window.__gallavoice_utterance = utterance;
+
+    // Guarantee onComplete fires even if Windows Chromium silently drops onend
+    const estMs = Math.max(3000, Math.min(12000, text.trim().length * 95 + 2200));
+    safetyTimer = setTimeout(() => {
+      if (!completed && !this.synth.speaking) {
+        finishOnce();
+      }
+    }, estMs);
+
     setTimeout(() => {
       try {
         if (this.synth) {
@@ -118,8 +137,7 @@ class SpeechTTSManager {
         }
       } catch (err) {
         console.warn('Failed to trigger TTS:', err);
-        this.isSpeaking = false;
-        if (this.onStateChange) this.onStateChange(false);
+        finishOnce();
       }
     }, 50);
   }

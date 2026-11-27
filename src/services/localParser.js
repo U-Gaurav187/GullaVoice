@@ -829,14 +829,14 @@ export function parseStagingVoiceFollowUp(rawText = '', stagedDraft = null, cust
   const trimmed = rawText.trim();
   const cleanPunct = trimmed.replace(/[।.,!?]+$/g, '').trim();
 
-  // 1a. Pure negative ("नहीं" / "No" / "Nahi" alone with NO correction words after)
-  // Keep draft open and ask what needs to be changed!
-  if (/^(?:no|nahi|nahin|na|नहीं|ना|गलत|गलत\s*है)$/iu.test(cleanPunct)) {
+  // 1a. Pure negative or generic fix request ("नहीं", "नहीं कर दो", "और नहीं कर दो", "ये सही कर दो", "सही करो", "गलत है")
+  // with NO specific replacement items/numbers/names yet -> keep draft open and ask what to fix!
+  const hasInlineCorrectionContent = /(\d|kilo|kg|packet|pkt|tel|aloo|cheeni|chawal|dal|pyaz|kanda|तेल|आलू|चीनी|चावल|दाल|प्याज|कांदा|वैशाली|रमेश|ka\s+|ko\s+|के\s+|का\s+|को\s+)/iu.test(trimmed);
+  if (!hasInlineCorrectionContent && /(?:^|[\s,।])(?:no|nahi|nahin|na|nahi\s*kar\s*do|galat|galat\s*hai|sahi\s*kar\s*do|sahi\s*karo|ye\s*sahi\s*kar\s*do|नहीं|ना|नहीं\s*कर\s*दो|गलत|गलत\s*है|सही\s*कर\s*दो|सही\s*करो|ये\s*सही\s*कर\s*दो)(?:[\s,।!]|$)/iu.test(cleanPunct)) {
     return { action: 'ASK_CORRECTION' };
   }
 
   // 1b. Explicit full discard / cancel ("Retry", "Cancel", "रद्द करो", "दोबारा बोलना है")
-  const hasInlineCorrectionContent = /(\d|kilo|kg|packet|pkt|tel|aloo|cheeni|chawal|dal|तेल|आलू|चीनी|चावल|दाल|वैशाली|रमेश|ka\s+|ko\s+|के\s+|का\s+|को\s+)/iu.test(trimmed);
   const isRetry = !hasInlineCorrectionContent && /(?:^|[\s,।])(?:retry|cancel|discard|mat\s*karo|dobara|रद्द|मत\s*करो|कैंसल|दोबारा)(?:[\s,।!]|$)/iu.test(trimmed);
 
   if (isRetry) {
@@ -844,7 +844,7 @@ export function parseStagingVoiceFollowUp(rawText = '', stagedDraft = null, cust
   }
 
   // 2. Check CONFIRM / SAVE (only when no modification/negation keywords/numbers/names are present)
-  const hasModificationCues = /(\d+(\.\d+)?|naam|name|jagah|instead|change|badlo|sahi\s*karo|hua\s*tha|नाम|जगह|बदलो|लिखो|सही\s*करो|हुआ\s*था|नहीं|no\b)/iu.test(trimmed);
+  const hasModificationCues = /(\d+(\.\d+)?|naam|name|jagah|instead|change|badlo|sahi\s*karo|sahi\s*kar\s*do|hua\s*tha|नाम|जगह|बदलो|लिखो|सही\s*करो|सही\s*कर\s*दो|हुआ\s*था|नहीं|no\b)/iu.test(trimmed);
   const isConfirm = !hasModificationCues && (
     /(?:^|[\s,।])(?:confirm|confirmed|save|save\s*karo|save\s*kar\s*do|yes|ok|okay|haan|ha|sahi\s*hai|theek\s*hai|thik\s*hai|pakka|kar\s*do|कन्फर्म|कन्फर्म\s*करो|सेव|सेव\s*करो|सेव\s*कर\s*दो|हाँ|हां|सही\s*है|ठीक\s*है|पक्का|कर\s*दो)(?:[\s,।!]|$)/iu.test(trimmed)
   );
