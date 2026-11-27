@@ -133,16 +133,6 @@ export default function App() {
           console.log('📝 Groq Whisper Transcription:', transcript);
         } catch (groqErr) {
           console.warn('Groq Whisper failed:', groqErr.message);
-          // If both failed and no key exists, show key not set message
-          if (!effectiveGroqKey && !effectiveWisprKey) {
-            console.warn('⚠️ Cloud Speech API key not set.');
-            const msg = currentLanguage === 'hi'
-              ? '⚠️ Cloud AI Key Not Set: सेटिंग्स (⚙️) में फ्री Groq या Gemini API Key जोड़ें। आप नीचे दिए गए टेक्स्ट बॉक्स से शून्य-की लोकल इंजन से तुरंत टेस्ट कर सकते हैं।'
-              : '⚠️ Cloud AI Key Not Set: Please add a free Groq or Gemini API key in Settings (⚙️). You can also test speech commands below using the built-in Zero-Key Local Engine.';
-            alert(msg);
-            setIsSettingsOpen(true);
-            return;
-          }
           throw groqErr;
         }
       }
@@ -984,8 +974,6 @@ export default function App() {
                   currentTranscript={currentTranscript}
                   filteredNoise={filteredNoise}
                   language={currentLanguage}
-                  hasApiKey={Boolean(effectiveGroqKey || effectiveWisprKey || effectiveGeminiKey)}
-                  onOpenSettings={() => setIsSettingsOpen(true)}
                 />
               </>
             )}

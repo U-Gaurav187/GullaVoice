@@ -13,9 +13,7 @@ export default function GallaVoiceController({
   isProcessing,
   currentTranscript,
   filteredNoise = '',
-  language = 'hi',
-  hasApiKey = false,
-  onOpenSettings
+  language = 'hi'
 }) {
   const [isRecording, setIsRecording] = useState(false);
   const [micVolume, setMicVolume] = useState(0);
@@ -194,24 +192,8 @@ export default function GallaVoiceController({
             })}
           </div>
         ) : (
-          <div className="mt-4 flex flex-col items-center gap-1.5">
-            <span className="text-xs font-semibold text-stone-500">
-              {language === 'hi' ? 'क्लिक करके बोलना शुरू करें' : 'Click to start speaking'}
-            </span>
-            {hasApiKey ? (
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
-                <span>⚡ Cloud AI Active</span>
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={onOpenSettings}
-                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold transition-colors cursor-pointer"
-                title="Settings me API Key jodein"
-              >
-                <span>⚙️ API Key: Not Set (Zero-Key Local Mode)</span>
-              </button>
-            )}
+          <div className="mt-4 text-xs font-semibold text-stone-500">
+            {language === 'hi' ? 'क्लिक करके बोलना शुरू करें' : 'Click to start speaking'}
           </div>
         )}
       </div>
