@@ -11,13 +11,15 @@ import {
   TrendingDown,
   Edit2,
   Check,
-  X
+  X,
+  BookOpen
 } from 'lucide-react';
 
 export default function CustomerKhataTable({
   customers = [],
   onSelectCustomer,
   onOpenPdfReport,
+  onOpenNameDiary,
   onUpdateCustomerName,
   language = 'hi'
 }) {
@@ -98,6 +100,18 @@ export default function CustomerKhataTable({
               className="w-full text-xs pl-8 pr-3 py-1.5 rounded-xl border border-stone-300 bg-white focus:outline-none focus:border-orange-500"
             />
           </div>
+
+          {onOpenNameDiary && (
+            <button
+              type="button"
+              onClick={onOpenNameDiary}
+              className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold text-xs flex items-center gap-1.5 shrink-0 cursor-pointer"
+              title="नाम डायरी व अक्षर शब्दकोश (Customer Name Diary)"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-amber-700" />
+              <span>{language === 'hi' ? 'नाम डायरी' : 'Name Diary'}</span>
+            </button>
+          )}
 
           {onOpenPdfReport && (
             <button

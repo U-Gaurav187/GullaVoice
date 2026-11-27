@@ -23,11 +23,13 @@ import LanguageSelectModal from './components/LanguageSelectModal.jsx';
 import PurchaseDetailModal from './components/PurchaseDetailModal.jsx';
 import VoiceAssistantAnswerCard from './components/VoiceAssistantAnswerCard.jsx';
 import KhataPdfModal from './components/KhataPdfModal.jsx';
+import NameDiaryModal from './components/NameDiaryModal.jsx';
 
 import { storage } from './utils/storage.js';
 import { speechTTS } from './utils/speechTTS.js';
 import { audioRecorder } from './utils/audioRecorder.js';
 import { matchCustomerPhonetically } from './utils/phoneticMatcher.js';
+import { formatWhisperDictionaryPrompt, compareAlphabetSimilarity } from './utils/alphabetDifferentiator.js';
 import { transcribeWithGroqWhisper, parseWithGroqLlama } from './services/groqService.js';
 import {
   parseKiranaVoiceLocally,
@@ -41,6 +43,7 @@ export default function App() {
   const [transactions, setTransactions] = useState(() => storage.getTransactions());
   const [customers, setCustomers] = useState(() => storage.getCustomers());
   const [rateCard, setRateCard] = useState(() => storage.getRateCard());
+  const [nameDiary, setNameDiary] = useState(() => storage.getNameDiary());
   const [settings, setSettings] = useState(() => storage.getSettings());
 
   // Active voice & draft states
@@ -58,6 +61,7 @@ export default function App() {
   // Tabs & Modals
   const [activeTab, setActiveTab] = useState('VOICE'); // 'VOICE' | 'TRANSACTIONS' | 'CUSTOMERS'
   const [isRateCardOpen, setIsRateCardOpen] = useState(false);
+  const [isNameDiaryOpen, setIsNameDiaryOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLanguageModalOpen, setIsLanguageModalOpen] = useState(false);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
@@ -80,10 +84,14 @@ export default function App() {
   useEffect(() => { storage.saveTransactions(transactions); }, [transactions]);
   useEffect(() => { storage.saveCustomers(customers); }, [customers]);
   useEffect(() => { storage.saveRateCard(rateCard); }, [rateCard]);
+  useEffect(() => { storage.saveNameDiary(nameDiary); }, [nameDiary]);
   useEffect(() => { storage.saveSettings(settings); }, [settings]);
 
   const currentLanguage = settings.speechLanguage === 'en' ? 'en' : 'hi';
   const effectiveGroqKey = settings.groqApiKey || import.meta.env.VITE_GROQ_API_KEY || '';
+  const strictAlphabet = (settings.accentToleranceLevel || 'STRICT') === 'STRICT';
+  const matcherOptions = { strictAlphabet, diaryEntries: nameDiary };
+  const whisperBiasPrompt = formatWhisperDictionaryPrompt(customers, nameDiary, rateCard);
 
   // Aggregate stats (Authoritative net udhaar after deducting jama)
   const grossUdhaar = customers.reduce((sum, c) => sum + (c.totalUdhaar || 0), 0);
@@ -102,7 +110,8 @@ export default function App() {
       const transcript = await transcribeWithGroqWhisper(
         effectiveGroqKey,
         audioBlob,
-        currentLanguage
+        currentLanguage,
+        whisperBiasPrompt
       );
 
       if (!transcript || transcript.trim().length === 0) {
@@ -158,7 +167,7 @@ export default function App() {
    */
   const executeAIParser = async (transcriptText) => {
     // 0. PURE IN-APP LOCAL CHECK: Handle PDF generation 100% locally inside the app (NO AI API keys or network calls used)
-    const localPdfCheck = parseKiranaVoiceLocally(transcriptText, customers, rateCard);
+    const localPdfCheck = parseKiranaVoiceLocally(transcriptText, customers, rateCard, transactions, matcherOptions);
     if (localPdfCheck && localPdfCheck.intent === 'GENERATE_PDF') {
       console.log('📄 PDF requested: generating in-app 100% locally from device storage (ZERO AI API keys used)');
       setIsPdfModalOpen(true);
@@ -184,6 +193,8 @@ export default function App() {
         transcript: transcriptText,
         customers,
         rateCard,
+        nameDiary,
+        accentToleranceLevel: settings.accentToleranceLevel || 'STRICT',
         language: currentLanguage
       });
     } catch (err) {
@@ -192,18 +203,29 @@ export default function App() {
 
     // 2. Fallback to Local Deterministic Engine
     if (!parsedResult) {
-      parsedResult = parseKiranaVoiceLocally(transcriptText, customers, rateCard, transactions);
+      parsedResult = parseKiranaVoiceLocally(transcriptText, customers, rateCard, transactions, matcherOptions);
     }
 
-    // Verify / strengthen customer match using phonetic matching
+    // Verify / strengthen customer match using exact alphabet + diary-aware matching
     const spokenCust = parsedResult.customer_spoken || parsedResult.matched_customer_name || '';
     if (spokenCust) {
-      const phoneticMatch = matchCustomerPhonetically(spokenCust, customers, 0.65);
+      const phoneticMatch = matchCustomerPhonetically(spokenCust, customers, 0.70, matcherOptions);
       if (phoneticMatch.isMatch && phoneticMatch.customer) {
         parsedResult.matched_customer_id = phoneticMatch.customer.id;
         parsedResult.matched_customer_name = phoneticMatch.customer.name;
+        parsedResult.matched_customer_hindi_name = phoneticMatch.customer.hindiName || phoneticMatch.customer.name;
         parsedResult.match_confidence = Math.max(parsedResult.match_confidence || 0, phoneticMatch.confidence);
+      } else {
+        // Never force-merge distinct alphabets; align canonical script from Name Diary if exact match
+        parsedResult.matched_customer_id = null;
+        if (phoneticMatch.matchedName && phoneticMatch.matchedName !== spokenCust) {
+          parsedResult.matched_customer_name = phoneticMatch.matchedName;
+        }
+        if (phoneticMatch.matchedHindiName) {
+          parsedResult.matched_customer_hindi_name = phoneticMatch.matchedHindiName;
+        }
       }
+      parsedResult.near_customer_matches = phoneticMatch.nearMatches || parsedResult.near_customer_matches || [];
     }
 
     // Enrich items with Store Rate Card pricing if price was 0 or uncalculated
@@ -909,9 +931,9 @@ export default function App() {
       );
     }
 
-    // 4. Phonetic & Fuzzy lookup (prevents duplicate accounts on accent slips)
+    // 4. Alphabet & Diary-aware lookup (respects strict letter differentiation when enabled)
     if (customerIndex === -1) {
-      const pMatch = matchCustomerPhonetically(customerName || stagedDraft.customer_spoken, updatedCustomers, 0.58);
+      const pMatch = matchCustomerPhonetically(customerName || stagedDraft.customer_spoken, updatedCustomers, strictAlphabet ? 0.72 : 0.58, matcherOptions);
       if (pMatch.isMatch && pMatch.customer) {
         customerIndex = updatedCustomers.findIndex(c => c.id === pMatch.customer.id);
       }
@@ -927,11 +949,16 @@ export default function App() {
       const newJama = !isUdhaar ? (existing.totalJama || 0) + amount : (existing.totalJama || 0);
       const newNet = newUdhaar - newJama;
 
-      // Consolidate aliases so future recognition gets even stronger
+      // Only bind spoken variant as alias when same consonant skeleton or non-strict mode,
+      // preventing distinct names like Vaisari from polluting Vaishali's ledger aliases.
+      const spokenSafeToAlias = stagedDraft.customer_spoken && (
+        !strictAlphabet ||
+        compareAlphabetSimilarity(existing.hindiName || existing.name, stagedDraft.customer_spoken).sameConsonants
+      );
       const mergedAliases = Array.from(new Set([
         ...(existing.aliases || []),
         customerName,
-        stagedDraft.customer_spoken
+        spokenSafeToAlias ? stagedDraft.customer_spoken : null
       ].filter(Boolean)));
 
       updatedCustomers[customerIndex] = {
@@ -945,13 +972,14 @@ export default function App() {
       targetCustomerId = existing.id;
       customerName = existing.name;
     } else {
-      // Only create new customer if completely novel and unrecognized
+      // Only create new customer if completely novel / distinct alphabet spelling
       const newCustId = `CUST_${String(updatedCustomers.length + 1).padStart(2, '0')}`;
+      const newHindiName = stagedDraft.matched_customer_hindi_name || customerName;
       const newCustomer = {
         id: newCustId,
         name: customerName,
-        hindiName: customerName,
-        aliases: [customerName, stagedDraft.customer_spoken].filter(Boolean),
+        hindiName: newHindiName,
+        aliases: [customerName].filter(Boolean),
         phone: '+91 98000 00000',
         totalUdhaar: isUdhaar ? amount : 0,
         totalJama: !isUdhaar ? amount : 0,
@@ -961,6 +989,24 @@ export default function App() {
       };
       updatedCustomers.push(newCustomer);
       targetCustomerId = newCustId;
+
+      // Auto-learn newly confirmed customer spelling into the Name Diary
+      const alreadyInDiary = nameDiary.some(
+        d => d.name.toLowerCase() === customerName.toLowerCase() || d.hindiName === newHindiName
+      );
+      if (!alreadyInDiary) {
+        setNameDiary(prev => [
+          {
+            id: `DICT_${Date.now()}`,
+            name: customerName,
+            hindiName: newHindiName,
+            aliases: [],
+            isCustom: true,
+            category: 'Customer Khata'
+          },
+          ...prev
+        ]);
+      }
     }
 
     const matchedCust = updatedCustomers.find(c => c.id === targetCustomerId);
@@ -1070,7 +1116,7 @@ export default function App() {
     setIsAutoListening(false);
     speechTTS.stop();
 
-    const localFollowUp = parseStagingVoiceFollowUp(followUpText, stagedDraft, customers, rateCard);
+    const localFollowUp = parseStagingVoiceFollowUp(followUpText, stagedDraft, customers, rateCard, matcherOptions);
     if (localFollowUp?.action === 'CONFIRM') {
       handleContinue();
       return;
@@ -1109,12 +1155,14 @@ export default function App() {
         transcript: contextualPrompt,
         customers,
         rateCard,
+        nameDiary,
+        accentToleranceLevel: settings.accentToleranceLevel || 'STRICT',
         language: currentLanguage
       });
 
       if (groqUpdated && groqUpdated.intent !== 'NOISE_ONLY' && (groqUpdated.matched_customer_name || groqUpdated.customer_spoken || (groqUpdated.items && groqUpdated.items.length > 0))) {
         const spokenCust = groqUpdated.customer_spoken || groqUpdated.matched_customer_name || stagedDraft.customer_spoken;
-        const pMatch = spokenCust ? matchCustomerPhonetically(spokenCust, customers, 0.65) : { isMatch: false };
+        const pMatch = spokenCust ? matchCustomerPhonetically(spokenCust, customers, 0.70, matcherOptions) : { isMatch: false };
 
         let computedTotal = Number(groqUpdated.total_amount_inr) || 0;
         const enrichedItems = (groqUpdated.items || stagedDraft.items || []).map(item => {
@@ -1188,7 +1236,8 @@ export default function App() {
       const transcript = await transcribeWithGroqWhisper(
         effectiveGroqKey,
         audioBlob,
-        currentLanguage
+        currentLanguage,
+        whisperBiasPrompt
       );
       console.log('🗣️ Staging follow-up heard:', transcript);
       if (transcript && transcript.trim()) {
@@ -1290,7 +1339,8 @@ export default function App() {
       const transcript = await transcribeWithGroqWhisper(
         effectiveGroqKey,
         audioBlob,
-        currentLanguage
+        currentLanguage,
+        whisperBiasPrompt
       );
       console.log('🗣️ Answer card follow-up heard:', transcript);
       if (transcript && transcript.trim()) {
@@ -1362,6 +1412,7 @@ export default function App() {
         settings={settings}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenRateCard={() => setIsRateCardOpen(true)}
+        onOpenNameDiary={() => setIsNameDiaryOpen(true)}
         onOpenLanguageModal={() => setIsLanguageModalOpen(true)}
         onOpenPdfReport={() => setIsPdfModalOpen(true)}
         transactions={transactions}
@@ -1507,6 +1558,7 @@ export default function App() {
               customers={customers}
               onSelectCustomer={setSelectedCustomer}
               onOpenPdfReport={() => setIsPdfModalOpen(true)}
+              onOpenNameDiary={() => setIsNameDiaryOpen(true)}
               onUpdateCustomerName={handleUpdateCustomerName}
               language={currentLanguage}
             />
@@ -1540,6 +1592,16 @@ export default function App() {
         onClose={() => setIsRateCardOpen(false)}
         rateCard={rateCard}
         onUpdateRateCard={setRateCard}
+      />
+
+      <NameDiaryModal
+        isOpen={isNameDiaryOpen}
+        onClose={() => setIsNameDiaryOpen(false)}
+        nameDiary={nameDiary}
+        customers={customers}
+        onUpdateNameDiary={setNameDiary}
+        strictAlphabet={strictAlphabet}
+        language={currentLanguage}
       />
 
       <SettingsModal

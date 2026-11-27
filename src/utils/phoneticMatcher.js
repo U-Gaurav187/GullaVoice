@@ -1,8 +1,15 @@
 /**
- * Phonetic & Fuzzy Customer Name Matcher
- * Maps regional Indian accents (e.g., "Rames", "Ramess", "Rameshwar" -> "Ramesh Bhai")
- * using Hinglish phonetic sound transformation and Levenshtein distance.
+ * Phonetic, Alphabet-Exact & Name-Diary Customer Matcher
+ *
+ * Balances regional Hindi/Hinglish recognition with strict alphabet-by-alphabet
+ * differentiation (via alphabetDifferentiator.js) so names differing by even one
+ * consonant (e.g. Vaishali vs Vaisali vs Vaishari vs Vaisari) are NOT conflated.
  */
+
+import {
+  compareAlphabetSimilarity,
+  getExactConsonantSkeleton
+} from './alphabetDifferentiator.js';
 
 /**
  * Standard Levenshtein distance calculation
@@ -140,97 +147,277 @@ export function toHinglishPhoneticKey(str = '') {
 }
 
 /**
+ * Resolves a spoken/transcribed customer name against the offline/editable Name Diary.
+ * Preserves exact alphabet differences in strict mode while allowing cross-script alignment
+ * (e.g. "Vaishali" <-> "वैशाली") and explicit user-saved ASR slip aliases.
+ */
+export function resolveNameFromDiary(spokenName = '', nameDiary = [], strictAlphabet = true) {
+  const cleanSpoken = stripHonorifics(spokenName);
+  if (!cleanSpoken || !nameDiary || !nameDiary.length) {
+    return {
+      matched: false,
+      entry: null,
+      canonicalName: spokenName,
+      canonicalHindiName: spokenName,
+      nearSuggestions: []
+    };
+  }
+
+  let bestExact = null;
+  let bestAlias = null;
+  const nearSuggestions = [];
+
+  for (const entry of nameDiary) {
+    const cands = [entry.name, entry.hindiName].filter(Boolean);
+    let entryBestSim = 0;
+    let entryDiffs = [];
+    let matchedExplicitAlias = false;
+
+    for (const cand of cands) {
+      const cleanCand = stripHonorifics(cand);
+      if (!cleanCand) continue;
+
+      const alpha = compareAlphabetSimilarity(cleanSpoken, cleanCand);
+      if (cleanSpoken === cleanCand || alpha.exactMatch) {
+        bestExact = entry;
+        break;
+      }
+
+      if (alpha.exactAlphabetSimilarity > entryBestSim) {
+        entryBestSim = alpha.exactAlphabetSimilarity;
+        entryDiffs = alpha.consonantDiffs;
+      }
+    }
+
+    if (bestExact) break;
+
+    for (const alias of entry.aliases || []) {
+      const cleanAlias = stripHonorifics(alias);
+      if (!cleanAlias) continue;
+      const alpha = compareAlphabetSimilarity(cleanSpoken, cleanAlias);
+      if (cleanSpoken === cleanAlias || alpha.exactMatch) {
+        matchedExplicitAlias = true;
+        bestAlias = entry;
+        break;
+      }
+    }
+
+    if (matchedExplicitAlias) continue;
+
+    if (entryBestSim >= 0.42) {
+      nearSuggestions.push({
+        id: entry.id,
+        name: entry.name,
+        hindiName: entry.hindiName || entry.name,
+        similarity: entryBestSim,
+        diffs: entryDiffs
+      });
+    }
+  }
+
+  if (bestExact) {
+    return {
+      matched: true,
+      matchType: 'EXACT_ALPHABET',
+      entry: bestExact,
+      canonicalName: bestExact.name,
+      canonicalHindiName: bestExact.hindiName || bestExact.name,
+      nearSuggestions: []
+    };
+  }
+
+  if (bestAlias) {
+    return {
+      matched: true,
+      matchType: 'DIARY_ALIAS',
+      entry: bestAlias,
+      canonicalName: bestAlias.name,
+      canonicalHindiName: bestAlias.hindiName || bestAlias.name,
+      nearSuggestions: []
+    };
+  }
+
+  nearSuggestions.sort((a, b) => b.similarity - a.similarity);
+
+  // In strict alphabet mode, never silently overwrite a distinct consonant name like Vaisari -> Vaishali
+  // unless an explicit alias exists; instead surface nearSuggestions for confirmation chips.
+  return {
+    matched: false,
+    matchType: strictAlphabet ? 'STRICT_DISTINCT' : 'UNMATCHED',
+    entry: null,
+    canonicalName: spokenName,
+    canonicalHindiName: spokenName,
+    nearSuggestions: nearSuggestions.slice(0, 3)
+  };
+}
+
+/**
  * Match a spoken customer name against the existing database of customers.
- * Returns best match if confidence >= threshold (default 0.75).
- * 
+ * Supports strict alphabet differentiation so distinct names (Vaishali vs Vaisali vs Vaishari vs Vaisari)
+ * never merge into the wrong customer ledger.
+ *
  * @param {string} spokenName - The customer name recognized by speech/text
  * @param {Array} customers - List of registered customer objects
  * @param {number} threshold - Minimum confidence required for a match (0.75)
+ * @param {object} options - { strictAlphabet?: boolean, diaryEntries?: Array }
  */
-export function matchCustomerPhonetically(spokenName = '', customers = [], threshold = 0.75) {
+export function matchCustomerPhonetically(spokenName = '', customers = [], threshold = 0.75, options = {}) {
+  const { strictAlphabet = true, diaryEntries = [] } = options || {};
+
   if (!spokenName || !customers || !customers.length) {
+    const diaryInfo = resolveNameFromDiary(spokenName, diaryEntries, strictAlphabet);
     return {
       isMatch: false,
       customer: null,
       confidence: 0,
-      matchedName: spokenName || 'Unknown',
-      spokenName
+      matchedName: diaryInfo.matched ? diaryInfo.canonicalName : (spokenName || 'Unknown'),
+      matchedHindiName: diaryInfo.matched ? diaryInfo.canonicalHindiName : (spokenName || ''),
+      spokenName,
+      nearMatches: diaryInfo.nearSuggestions || []
     };
   }
 
   const cleanSpoken = stripHonorifics(spokenName);
+  const spokenSkeleton = getExactConsonantSkeleton(cleanSpoken);
   const phoneticSpoken = toHinglishPhoneticKey(spokenName);
 
   let bestMatch = null;
   let highestScore = 0;
+  let bestDiffs = [];
+  const nearMatchesMap = new Map();
 
   for (const customer of customers) {
-    const candidateNames = [
-      customer.name,
-      customer.hindiName,
-      ...(customer.aliases || [])
-    ];
+    const primaryNames = [customer.name, customer.hindiName].filter(Boolean);
+    const aliasNames = (customer.aliases || []).filter(Boolean);
+    let customerHighest = 0;
+    let customerBestDiffs = [];
 
-    for (const cand of candidateNames) {
-      if (!cand) continue;
+    for (const cand of primaryNames) {
       const cleanCand = stripHonorifics(cand);
-      const phoneticCand = toHinglishPhoneticKey(cand);
+      if (!cleanCand) continue;
 
-      // 1. Exact Match
-      if (cleanSpoken && cleanCand && cleanSpoken === cleanCand) {
+      const alpha = compareAlphabetSimilarity(cleanSpoken, cleanCand);
+
+      // 1. Exact literal or exact cross-script alphabet match (e.g. "Vaishali" == "वैशाली")
+      if (cleanSpoken === cleanCand || alpha.exactMatch) {
         return {
           isMatch: true,
           customer,
           confidence: 1.0,
           matchedName: customer.name,
-          spokenName
+          matchedHindiName: customer.hindiName || customer.name,
+          matchedId: customer.id,
+          spokenName,
+          nearMatches: [],
+          reason: `Exact alphabet match: ${customer.name} (100%)`
         };
       }
 
-      // 2. Substring match (require at least 3 characters to avoid false positives on honorific leftovers)
-      if (cleanSpoken && cleanCand && cleanSpoken.length >= 3 && cleanCand.length >= 3) {
-        if (cleanCand.includes(cleanSpoken) || cleanSpoken.includes(cleanCand)) {
-          const score = 0.95;
-          if (score > highestScore) {
-            highestScore = score;
-            bestMatch = customer;
-          }
+      // Track alphabet-exact similarity & diffs for near-match suggestions
+      if (alpha.exactAlphabetSimilarity >= 0.42) {
+        const existing = nearMatchesMap.get(customer.id);
+        if (!existing || alpha.exactAlphabetSimilarity > existing.similarity) {
+          nearMatchesMap.set(customer.id, {
+            id: customer.id,
+            name: customer.name,
+            hindiName: customer.hindiName || customer.name,
+            similarity: alpha.exactAlphabetSimilarity,
+            diffs: alpha.consonantDiffs
+          });
         }
       }
 
-      // 2. Hinglish Phonetic Key Match
-      if (phoneticSpoken && phoneticCand) {
-        if (phoneticSpoken === phoneticCand) {
-          const score = 0.92;
-          if (score > highestScore) {
-            highestScore = score;
-            bestMatch = customer;
-          }
+      let score = 0;
+      const candSkeleton = getExactConsonantSkeleton(cleanCand);
+      const sameConsonants = Boolean(spokenSkeleton && candSkeleton && spokenSkeleton === candSkeleton);
+
+      if (strictAlphabet) {
+        // Strict Alphabet Differentiation:
+        // Consonants MUST match in full (e.g. V-SH-L vs V-S-L vs V-SH-R are blocked from auto-merging!)
+        if (sameConsonants) {
+          // Same consonant skeleton, minor vowel/matra difference (e.g. Anita vs Aneeta)
+          score = Math.max(0.82, alpha.exactAlphabetSimilarity);
         } else {
-          const phoneticSim = calculateSimilarity(phoneticSpoken, phoneticCand);
-          const rawSim = calculateSimilarity(cleanSpoken, cleanCand);
-          const weightedSim = phoneticSim * 0.65 + rawSim * 0.35;
-
-          if (weightedSim > highestScore) {
-            highestScore = weightedSim;
-            bestMatch = customer;
+          // Consonants differ (e.g. श vs स, ल vs र, व vs ब): cap safely below match threshold!
+          score = Math.min(alpha.exactAlphabetSimilarity * 0.66, 0.62);
+        }
+      } else {
+        // Moderate / Lenient dialect fallback when requested by user
+        if (sameConsonants) {
+          score = Math.max(0.88, alpha.exactAlphabetSimilarity);
+        } else if (cleanSpoken.length >= 3 && cleanCand.length >= 3 && (cleanCand.includes(cleanSpoken) || cleanSpoken.includes(cleanCand))) {
+          score = 0.86;
+        } else if (phoneticSpoken) {
+          const phoneticCand = toHinglishPhoneticKey(cand);
+          if (phoneticSpoken === phoneticCand) {
+            score = 0.85;
+          } else {
+            const phoneticSim = calculateSimilarity(phoneticSpoken, phoneticCand);
+            const rawSim = calculateSimilarity(cleanSpoken, cleanCand);
+            score = phoneticSim * 0.45 + alpha.exactAlphabetSimilarity * 0.35 + rawSim * 0.2;
           }
         }
       }
+
+      if (score > customerHighest) {
+        customerHighest = score;
+        customerBestDiffs = alpha.consonantDiffs;
+      }
+    }
+
+    // 2. Explicit user-saved aliases still match reliably
+    for (const alias of aliasNames) {
+      const cleanAlias = stripHonorifics(alias);
+      if (!cleanAlias) continue;
+      const alpha = compareAlphabetSimilarity(cleanSpoken, cleanAlias);
+      if (cleanSpoken === cleanAlias || alpha.exactMatch) {
+        customerHighest = Math.max(customerHighest, 0.98);
+      } else if (!strictAlphabet) {
+        const phoneticAlias = toHinglishPhoneticKey(alias);
+        if (phoneticSpoken && phoneticAlias === phoneticSpoken) {
+          customerHighest = Math.max(customerHighest, 0.88);
+        }
+      }
+    }
+
+    if (customerHighest > highestScore) {
+      highestScore = customerHighest;
+      bestMatch = customer;
+      bestDiffs = customerBestDiffs;
     }
   }
 
   const isMatch = highestScore >= threshold && bestMatch !== null;
+  const nearMatches = Array.from(nearMatchesMap.values())
+    .filter(nm => !isMatch || nm.id !== bestMatch?.id)
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, 3);
+
+  // If unmatched against registered customers, consult the offline Name Diary for canonical spelling/suggestions
+  const diaryFallback = !isMatch
+    ? resolveNameFromDiary(spokenName, diaryEntries, strictAlphabet)
+    : null;
+
+  const combinedNear = nearMatches.length > 0
+    ? nearMatches
+    : (diaryFallback?.nearSuggestions || []);
 
   return {
     isMatch,
     customer: isMatch ? bestMatch : null,
     confidence: Number(highestScore.toFixed(2)),
-    matchedName: isMatch ? bestMatch.name : spokenName,
+    matchedName: isMatch
+      ? bestMatch.name
+      : (diaryFallback?.matched ? diaryFallback.canonicalName : spokenName),
+    matchedHindiName: isMatch
+      ? (bestMatch.hindiName || bestMatch.name)
+      : (diaryFallback?.matched ? diaryFallback.canonicalHindiName : spokenName),
     matchedId: isMatch ? bestMatch.id : null,
     spokenName,
-    reason: isMatch 
-      ? `Matched to existing customer: ${bestMatch.name} (${Math.round(highestScore * 100)}% phonetic match)`
-      : `New or unmatched customer: ${spokenName}`
+    consonantDiffs: bestDiffs,
+    nearMatches: combinedNear,
+    reason: isMatch
+      ? `Matched to existing customer: ${bestMatch.name} (${Math.round(highestScore * 100)}% match)`
+      : `Distinct or unmatched customer: ${spokenName}`
   };
 }

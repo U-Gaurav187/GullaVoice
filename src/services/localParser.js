@@ -14,7 +14,7 @@ import { buildHindiReadback } from '../utils/hindiDevanagariHelper.js';
  * Detects full/partial Udhaar settlement ("पैसा आ चुका है", "उधार आ गया", "चुकता हो गया")
  * and supports multi-customer lists separated by "और" / "and" / "," (e.g. "महीद और रोहिद के खाते में का उधार पैसा आ चुका है").
  */
-export function parseMultiOrSettlementIntent(rawTranscript = '', customers = [], ignoredNoiseText = '') {
+export function parseMultiOrSettlementIntent(rawTranscript = '', customers = [], ignoredNoiseText = '', matcherOptions = {}) {
   if (!rawTranscript || !rawTranscript.trim()) return null;
 
   const trimmed = rawTranscript.trim();
@@ -45,7 +45,7 @@ export function parseMultiOrSettlementIntent(rawTranscript = '', customers = [],
   if (splitNames.length === 0) return null;
 
   const resolvedList = splitNames.map(spoken => {
-    const pMatch = matchCustomerPhonetically(spoken, customers, 0.56);
+    const pMatch = matchCustomerPhonetically(spoken, customers, 0.56, matcherOptions);
     if (pMatch.isMatch && pMatch.customer) {
       const cust = pMatch.customer;
       const net = Math.max(0, (cust.totalUdhaar || 0) - (cust.totalJama || 0));
@@ -191,7 +191,7 @@ export function parseMultiOrSettlementIntent(rawTranscript = '', customers = [],
   };
 }
 
-export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rateCard = [], transactions = []) {
+export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rateCard = [], transactions = [], matcherOptions = {}) {
   if (!rawTranscript || !rawTranscript.trim()) {
     return {
       intent: 'NOISE_ONLY',
@@ -307,7 +307,7 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
 
   // Step 2.55: Check for Full Settlement / Multi-Customer Payment Received
   // e.g. "महीद और रोहिद के खाते में का उधार पैसा आ चुका है।"
-  const settlementResult = parseMultiOrSettlementIntent(rawTranscript, customers, ignoredNoiseText);
+  const settlementResult = parseMultiOrSettlementIntent(rawTranscript, customers, ignoredNoiseText, matcherOptions);
   if (settlementResult) {
     return settlementResult;
   }
@@ -410,7 +410,7 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
   const hasStoreOrGroupTerm = /(dukan|dukaan|store|total|kul|grahak|grahakon|grahkon|customer|customers|logon|sabka|sabhi|sab|mujhe|mera|meri|humara|kis\s*kis|kaun\s*kaun)/i.test(normalizedText) ||
     /(दुकान|स्टोर|कुल|टोटल|ग्राहक|ग्राहकों|ग्रहक|ग्रहकों|कस्टमर|लोगों|सबका|सभी|सब|मुझे|मेरा|मेरी|हमारा|किस[\s-]*किस|कौन[\s-]*कौन)/iu.test(normalizedText);
   const mentionsMetric = /(udhaar|udhar|baaki|baki|bacha|bache|balance|hisab|hisaab|paisa|paise|lena|उधार|बाकी|बचा|बची|बचे|बैलेंस|हिसाब|पैसा|पैसे|लेना)/iu.test(normalizedText);
-  const explicitPersonalMatch = matchCustomerPhonetically(normalizedText, customers, 0.78);
+  const explicitPersonalMatch = matchCustomerPhonetically(normalizedText, customers, 0.78, matcherOptions);
 
   if (isQuery && hasStoreOrGroupTerm && mentionsMetric && !explicitPersonalMatch.isMatch) {
     const grossStoreUdhaar = (customers || []).reduce((sum, c) => sum + (c.totalUdhaar || 0), 0);
@@ -485,7 +485,7 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
       }
     }
 
-    const phoneticMatch = matchCustomerPhonetically(spokenCust, customers, 0.60);
+    const phoneticMatch = matchCustomerPhonetically(spokenCust, customers, 0.60, matcherOptions);
     const targetCust = phoneticMatch.isMatch ? phoneticMatch.customer : customers.find(c => 
       c.name.toLowerCase().includes(spokenCust.toLowerCase()) || 
       (c.hindiName && c.hindiName.includes(spokenCust))
@@ -638,10 +638,12 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
     spokenCustomerName = words;
   }
 
-  const phoneticMatch = matchCustomerPhonetically(spokenCustomerName, customers, 0.70);
+  const phoneticMatch = matchCustomerPhonetically(spokenCustomerName, customers, 0.70, matcherOptions);
   const matched_customer_name = phoneticMatch.matchedName;
+  const matched_customer_hindi_name = phoneticMatch.matchedHindiName || phoneticMatch.matchedName;
   const match_confidence = phoneticMatch.confidence;
   const matched_customer_id = phoneticMatch.customer?.id || null;
+  const near_customer_matches = phoneticMatch.nearMatches || [];
 
   // Step 5: Extract Items & Amounts
   const items = [];
@@ -734,8 +736,10 @@ export function parseKiranaVoiceLocally(rawTranscript = '', customers = [], rate
     intent,
     customer_spoken: spokenCustomerName,
     matched_customer_name,
+    matched_customer_hindi_name,
     matched_customer_id,
     match_confidence,
+    near_customer_matches,
     phonetic_reason: phoneticMatch.reason,
     items: finalItems,
     total_amount_inr,
@@ -823,7 +827,7 @@ export function extractRateCardUpdatesFromText(rawText = '', rateCard = []) {
  * - Voice Name Correction ("ग्राहक का नाम वैशाली है", "वैशाली लिखो", "by sari nahi Vaishali", "वैशाली")
  * - Voice Quantity/Item Correction ("instead of 4 kg potato, 3.5 kg potato", "आलू 3.5 किलो कर दो")
  */
-export function parseStagingVoiceFollowUp(rawText = '', stagedDraft = null, customers = [], rateCard = []) {
+export function parseStagingVoiceFollowUp(rawText = '', stagedDraft = null, customers = [], rateCard = [], matcherOptions = {}) {
   if (!rawText || !rawText.trim() || !stagedDraft) return null;
 
   const trimmed = rawText.trim();
@@ -951,11 +955,14 @@ export function parseStagingVoiceFollowUp(rawText = '', stagedDraft = null, cust
   let correctedName = '';
 
   const nahiMatch = strippedCore.match(/[\p{L}\p{M}\s]{2,25}?\s+(?:nahi|नहीं)\s+([\p{L}\p{M}\s]{2,25}?)(?:\s+(?:hai|हैं|है|likho|लिखो|karo|करो)|[।,.]|$)/iu);
+  const reverseLikhoMatch = strippedCore.match(/^([\p{L}\p{M}\s]{2,25}?)\s+(?:लिखो|लिख\s+दो|नाम\s+लिखो|कर\s+दो|likho|likh\s+do)[,\s।]+[\p{L}\p{M}\s]{2,25}?\s+(?:nahi|नहीं)\b/iu);
   const explicitNameMatch = strippedCore.match(/(?:ग्राहक\s+का\s+नाम|grahak\s+ka\s+naam|customer\s+name|naam|name|it\s+is)\s+(?:is\s+)?([\p{L}\p{M}\s]{2,25}?)(?:\s+(?:hai|हैं|है|likho|लिखो|लिख\s+दो|karo|कर\s+दो|ya\s+phir|या\s+फिर)|[।,.]|$)/iu);
   const likhoMatch = strippedCore.match(/^([\p{L}\p{M}\s]{2,25}?)\s+(?:लिखो|लिख\s+दो|नाम\s+लिखो|कर\s+दो|likho|likh\s+do)/iu);
 
   if (explicitNameMatch) {
     correctedName = explicitNameMatch[1].trim();
+  } else if (reverseLikhoMatch) {
+    correctedName = reverseLikhoMatch[1].trim();
   } else if (nahiMatch) {
     correctedName = nahiMatch[1].trim();
   } else if (likhoMatch) {
@@ -974,11 +981,13 @@ export function parseStagingVoiceFollowUp(rawText = '', stagedDraft = null, cust
   if (correctedName) {
     correctedName = correctedName.replace(/^(?:it\s+is|naam|name|ग्राहक|नाम)\s+/iu, '').trim();
     if (correctedName.length >= 2) {
-      const pMatch = matchCustomerPhonetically(correctedName, customers, 0.65);
+      const pMatch = matchCustomerPhonetically(correctedName, customers, 0.65, matcherOptions);
       updatedDraft.customer_spoken = correctedName;
-      updatedDraft.matched_customer_name = pMatch.isMatch ? pMatch.matchedName : correctedName;
+      updatedDraft.matched_customer_name = pMatch.isMatch ? pMatch.matchedName : (pMatch.matchedName || correctedName);
+      updatedDraft.matched_customer_hindi_name = pMatch.matchedHindiName || updatedDraft.matched_customer_name;
       updatedDraft.matched_customer_id = pMatch.isMatch ? (pMatch.customer?.id || null) : null;
       updatedDraft.match_confidence = pMatch.isMatch ? pMatch.confidence : 1.0;
+      updatedDraft.near_customer_matches = pMatch.nearMatches || [];
       modified = true;
     }
   }

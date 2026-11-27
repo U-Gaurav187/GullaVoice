@@ -29,7 +29,10 @@ RULES:
 5. DYNAMIC STAGING CORRECTIONS:
 - If input begins with "CURRENT STAGED DRAFT:", restructure the draft per USER VOICE CORRECTION (replace items/name/quantity if restated, e.g. "no, वैशाली का 2 packet तेल हुआ था"), compute prices from rate card, and end "tts_hindi_readback" with "क्या इसे सेव करें?".
 
-6. READBACK:
+6. STRICT ALPHABET & NAME DIARY:
+- Differentiate every single letter/consonant in customer names (e.g. Vaishali/वैशाली vs Vaisali/वैसाली vs Vaishari/वैशारी vs Vaisari/वैसारी). NEVER merge customers differing in श/स, ल/र, ब/व unless in customer aliases. Align spelling with NAME_DIARY ONLY on exact match or unambiguous slip when strict=false.
+
+7. READBACK:
 - Always provide natural Devanagari "tts_hindi_readback" and English "tts_readback".
 
 Return valid JSON only:
@@ -76,7 +79,13 @@ function blobToBase64(blob) {
  * Transcribe Audio Blob using Groq Whisper Large v3 Turbo
  * Uses secure serverless proxy (/api/transcribe) if no client key is provided
  */
-export async function transcribeWithGroqWhisper(apiKey, audioBlob, language = 'hi') {
+export async function transcribeWithGroqWhisper(apiKey, audioBlob, language = 'hi', customPrompt = '') {
+  const defaultPrompt =
+    'किराना खाता: अविनाश, रमेश भाई, वैशाली, पार्थ, सुनीता, शर्मा जी, पिंटू। सेव, नमकीन, आलू, कांदा, प्याज, टमाटर, धनिया, चीनी, दूध, तेल, चावल। कितने ग्राहकों का कितना उधार बचा है, मुझे कितना उधार है, कन्फर्म करो, ग्राहक का नाम वैशाली लिखो, जमा करो।';
+  const safePrompt = (typeof customPrompt === 'string' && customPrompt.trim())
+    ? customPrompt.trim().slice(0, 560)
+    : defaultPrompt;
+
   // If NO apiKey provided, route securely through serverless API proxy (zero key exposure)
   if (!apiKey) {
     console.log('🔒 Using secure serverless proxy /api/transcribe (API key hidden on server)...');
@@ -87,7 +96,8 @@ export async function transcribeWithGroqWhisper(apiKey, audioBlob, language = 'h
       body: JSON.stringify({
         audioBase64: base64,
         mimeType: audioBlob.type || 'audio/wav',
-        language: language === 'en' ? 'en' : 'hi'
+        language: language === 'en' ? 'en' : 'hi',
+        customPrompt: safePrompt
       })
     });
 
@@ -116,10 +126,8 @@ export async function transcribeWithGroqWhisper(apiKey, audioBlob, language = 'h
       // CRITICAL: Explicitly set language so Whisper never misidentifies Hindi as Arabic/Turkish/Urdu
       formData.append('language', language === 'en' ? 'en' : 'hi');
 
-      // Concise vocabulary anchor prompt for Whisper decoder
-      formData.append('prompt',
-        'किराना खाता: अविनाश, रमेश भाई, वैशाली, पार्थ, सुनीता, शर्मा जी, पिंटू। सेव, नमकीन, आलू, कांदा, प्याज, टमाटर, धनिया, चीनी, दूध, तेल, चावल। कितने ग्राहकों का कितना उधार बचा है, मुझे कितना उधार है, कन्फर्म करो, ग्राहक का नाम वैशाली लिखो, जमा करो।'
-      );
+      // Concise vocabulary anchor prompt for Whisper decoder (fed from live Name Diary & Khata)
+      formData.append('prompt', safePrompt);
 
       // temperature=0 eliminates hallucination on quiet/noisy audio
       formData.append('temperature', '0');
@@ -158,7 +166,7 @@ export async function transcribeWithGroqWhisper(apiKey, audioBlob, language = 'h
  * Extract structured ledger transaction JSON from transcript using Groq models
  * Uses secure serverless proxy (/api/chat) if no client key is provided
  */
-export async function parseWithGroqLlama({ apiKey, transcript, customers = [], rateCard = [], language = 'hi' }) {
+export async function parseWithGroqLlama({ apiKey, transcript, customers = [], rateCard = [], nameDiary = [], accentToleranceLevel = 'STRICT', language = 'hi' }) {
   // If NO apiKey provided, route securely through serverless API proxy (zero key exposure)
   if (!apiKey) {
     console.log('🔒 Using secure serverless proxy /api/chat (API key hidden on server)...');
@@ -169,6 +177,8 @@ export async function parseWithGroqLlama({ apiKey, transcript, customers = [], r
         transcript,
         customers,
         rateCard,
+        nameDiary,
+        accentToleranceLevel,
         language
       })
     });
@@ -188,8 +198,13 @@ export async function parseWithGroqLlama({ apiKey, transcript, customers = [], r
     `${r.name}${r.hindiName ? `(${r.hindiName})` : ''}=${r.unitPrice}/${r.unit}`
   ).join(', ');
 
-  const userContext = `LANG: ${language === 'hi' ? 'Hindi' : 'English'}
+  const compactDiary = (nameDiary || []).slice(0, 30).map(d =>
+    `${d.name}${d.hindiName ? `(${d.hindiName})` : ''}`
+  ).join(', ') || 'Default';
+
+  const userContext = `LANG: ${language === 'hi' ? 'Hindi' : 'English'} | STRICT_ALPHABET: ${accentToleranceLevel === 'STRICT' ? 'true' : 'false'}
 CUSTOMERS: ${compactCustomers}
+NAME_DIARY: ${compactDiary}
 RATES: ${compactRateCard}
 SPEECH: "${transcript}"`;
 

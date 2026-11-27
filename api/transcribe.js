@@ -21,10 +21,16 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { audioBase64, mimeType = 'audio/wav', language = 'hi' } = req.body || {};
+    const { audioBase64, mimeType = 'audio/wav', language = 'hi', customPrompt = '' } = req.body || {};
     if (!audioBase64) {
       return res.status(400).json({ error: 'audioBase64 parameter is required.' });
     }
+
+    const defaultPrompt =
+      'किराना खाता: अविनाश, रमेश भाई, वैशाली, पार्थ, सुनीता, शर्मा जी, पिंटू। सेव, नमकीन, आलू, कांदा, प्याज, टमाटर, धनिया, चीनी, दूध, तेल, चावल। कितने ग्राहकों का कितना उधार बचा है, मुझे कितना उधार है, कन्फर्म करो, ग्राहक का नाम वैशाली लिखो, जमा करो।';
+    const safePrompt = (typeof customPrompt === 'string' && customPrompt.trim())
+      ? customPrompt.trim().slice(0, 560)
+      : defaultPrompt;
 
     const isWav = (mimeType || '').includes('wav');
     const cleanMime = isWav ? 'audio/wav' : 'audio/webm';
@@ -41,10 +47,7 @@ export default async function handler(req, res) {
         formData.append('file', blob, filename);
         formData.append('model', model);
         formData.append('language', language === 'en' ? 'en' : 'hi');
-        formData.append(
-          'prompt',
-          'किराना खाता: अविनाश, रमेश भाई, वैशाली, पार्थ, सुनीता, शर्मा जी, पिंटू। सेव, नमकीन, आलू, कांदा, प्याज, टमाटर, धनिया, चीनी, दूध, तेल, चावल। कितने ग्राहकों का कितना उधार बचा है, मुझे कितना उधार है, कन्फर्म करो, ग्राहक का नाम वैशाली लिखो, जमा करो।'
-        );
+        formData.append('prompt', safePrompt);
         formData.append('temperature', '0');
         formData.append('response_format', 'verbose_json');
 

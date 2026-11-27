@@ -23,7 +23,10 @@ RULES:
 5. DYNAMIC STAGING CORRECTIONS:
 - If input begins with "CURRENT STAGED DRAFT:", restructure the draft per USER VOICE CORRECTION (replace items/name/quantity if restated, e.g. "no, वैशाली का 2 packet तेल हुआ था"), compute prices from rate card, and end "tts_hindi_readback" with "क्या इसे सेव करें?".
 
-6. READBACK:
+6. STRICT ALPHABET & NAME DIARY:
+- Differentiate every single letter/consonant in customer names (e.g. Vaishali/वैशाली vs Vaisali/वैसाली vs Vaishari/वैशारी vs Vaisari/वैसारी). NEVER merge customers differing in श/स, ल/र, ब/व unless in customer aliases. Align spelling with NAME_DIARY ONLY on exact match or unambiguous slip when strict=false.
+
+7. READBACK:
 - Always provide natural Devanagari "tts_hindi_readback" and English "tts_readback".
 
 Return valid JSON only:
@@ -69,7 +72,7 @@ export default async function handler(req, res) {
     if (typeof body === 'string') {
       try { body = JSON.parse(body); } catch (e) {}
     }
-    const { transcript, customers = [], rateCard = [], language = 'hi' } = body || {};
+    const { transcript, customers = [], rateCard = [], nameDiary = [], accentToleranceLevel = 'STRICT', language = 'hi' } = body || {};
     if (!transcript) return res.status(400).json({ error: 'transcript required.' });
 
     const compactCustomers = (customers || []).map(c =>
@@ -80,8 +83,13 @@ export default async function handler(req, res) {
       `${r.name}${r.hindiName ? `(${r.hindiName})` : ''}=${r.unitPrice}/${r.unit}`
     ).join(', ');
 
-    const userContext = `LANG: ${language === 'hi' ? 'Hindi' : 'English'}
+    const compactDiary = (nameDiary || []).slice(0, 30).map(d =>
+      `${d.name}${d.hindiName ? `(${d.hindiName})` : ''}`
+    ).join(', ') || 'Default';
+
+    const userContext = `LANG: ${language === 'hi' ? 'Hindi' : 'English'} | STRICT_ALPHABET: ${accentToleranceLevel === 'STRICT' ? 'true' : 'false'}
 CUSTOMERS: ${compactCustomers}
+NAME_DIARY: ${compactDiary}
 RATES: ${compactRateCard}
 SPEECH: "${transcript}"`;
 

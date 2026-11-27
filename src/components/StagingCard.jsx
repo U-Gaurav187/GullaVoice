@@ -13,6 +13,7 @@ import {
   Send,
   RefreshCw
 } from 'lucide-react';
+import { formatAksharaChips } from '../utils/alphabetDifferentiator.js';
 
 export default function StagingCard({
   stagedDraft,
@@ -84,12 +85,25 @@ export default function StagingCard({
                 {language === 'hi' ? 'ग्राहक का नाम (Customer):' : 'Customer Account:'}
               </span>
               <span className="text-lg font-black text-stone-900">
-                {stagedDraft.matched_customer_name || stagedDraft.customer_spoken || 'Walk-in Customer'}
+                {stagedDraft.matched_customer_hindi_name || stagedDraft.matched_customer_name || stagedDraft.customer_spoken || 'Walk-in Customer'}
               </span>
+              {/* Exact Akshara / Alphabet Chips */}
+              {(stagedDraft.matched_customer_hindi_name || stagedDraft.matched_customer_name || stagedDraft.customer_spoken) && (
+                <div className="flex flex-wrap items-center gap-1 mt-1">
+                  {formatAksharaChips(stagedDraft.matched_customer_hindi_name || stagedDraft.matched_customer_name || stagedDraft.customer_spoken).map((chip, idx) => (
+                    <span
+                      key={idx}
+                      className="text-[10px] px-1.5 py-0.2 rounded bg-white border border-amber-200 text-amber-900 font-bold"
+                    >
+                      {chip}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Phonetic Match Pill */}
+          {/* Phonetic / Alphabet Match Pill */}
           {stagedDraft.match_confidence > 0 && (
             <div className="text-right">
               <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-full border border-emerald-300">
@@ -103,6 +117,26 @@ export default function StagingCard({
             </div>
           )}
         </div>
+
+        {/* Distinct Alphabet Near-Match Suggestions from Name Diary / Khata */}
+        {stagedDraft.near_customer_matches && stagedDraft.near_customer_matches.length > 0 && (
+          <div className="mt-2.5 pt-2.5 border-t border-amber-200/70 flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-bold text-amber-900">
+              {language === 'hi' ? 'डायरी अक्षर सुझाव (बदलने हेतु चुनें):' : 'Similar Diary Names:'}
+            </span>
+            {stagedDraft.near_customer_matches.map((nm, idx) => (
+              <button
+                key={nm.id || idx}
+                type="button"
+                onClick={() => onStagingVoiceCommand && onStagingVoiceCommand(`${nm.hindiName || nm.name} लिखो`)}
+                className="text-[11px] px-2.5 py-0.5 rounded-full bg-white hover:bg-orange-50 text-stone-800 hover:text-orange-900 border border-amber-300 font-bold shadow-2xs transition-colors cursor-pointer"
+                title={nm.diffs?.length ? `अक्षर अंतर: ${nm.diffs.map(d => `${d.token1} ≠ ${d.token2}`).join(', ')}` : nm.name}
+              >
+                {nm.hindiName || nm.name}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Price Sanity Alert */}

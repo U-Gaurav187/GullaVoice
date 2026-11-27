@@ -6,11 +6,13 @@
 import { INITIAL_CUSTOMERS } from '../data/initialCustomers.js';
 import { INITIAL_RATE_CARD } from '../data/initialRateCard.js';
 import { INITIAL_TRANSACTIONS } from '../data/initialTransactions.js';
+import { INDIAN_NAME_DICTIONARY } from '../data/indianNameDictionary.js';
 
 const STORAGE_KEYS = {
   TRANSACTIONS: 'gallavoice_transactions_v3',
   CUSTOMERS: 'gallavoice_customers_v3',
   RATE_CARD: 'gallavoice_ratecard_v2',
+  NAME_DIARY: 'gallavoice_namediary_v1',
   SETTINGS: 'gallavoice_settings_v1'
 };
 
@@ -22,7 +24,7 @@ export const DEFAULT_SETTINGS = {
   audioFeedbackEnabled: true,
   autoReadback: true,
   speechLanguage: 'hi-IN',
-  accentToleranceLevel: 'MODERATE' // 'STRICT' | 'MODERATE' | 'LENIENT'
+  accentToleranceLevel: 'STRICT' // 'STRICT' (exact alphabet) | 'MODERATE' | 'LENIENT'
 };
 
 export const storage = {
@@ -125,6 +127,29 @@ export const storage = {
     }
   },
 
+  getNameDiary: () => {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.NAME_DIARY);
+      if (!data) {
+        localStorage.setItem(STORAGE_KEYS.NAME_DIARY, JSON.stringify(INDIAN_NAME_DICTIONARY));
+        return INDIAN_NAME_DICTIONARY;
+      }
+      const list = JSON.parse(data);
+      return Array.isArray(list) ? list : INDIAN_NAME_DICTIONARY;
+    } catch (e) {
+      console.error('Failed to load name diary:', e);
+      return INDIAN_NAME_DICTIONARY;
+    }
+  },
+
+  saveNameDiary: (entries) => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.NAME_DIARY, JSON.stringify(entries || []));
+    } catch (e) {
+      console.error('Failed to save name diary:', e);
+    }
+  },
+
   resetAll: () => {
     localStorage.removeItem('gallavoice_transactions_v1');
     localStorage.removeItem('gallavoice_transactions_v2');
@@ -133,6 +158,7 @@ export const storage = {
     localStorage.removeItem('gallavoice_customers_v2');
     localStorage.removeItem('gallavoice_customers_v3');
     localStorage.removeItem(STORAGE_KEYS.RATE_CARD);
+    localStorage.removeItem(STORAGE_KEYS.NAME_DIARY);
     localStorage.removeItem(STORAGE_KEYS.SETTINGS);
   }
 };

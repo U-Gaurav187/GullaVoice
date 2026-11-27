@@ -7,7 +7,8 @@ import {
   Languages,
   Sliders,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  BookOpen
 } from 'lucide-react';
 import { exportBackupJSON } from '../utils/storage';
 
@@ -140,6 +141,38 @@ export default function SettingsModal({
                 />
                 <div className="w-9 h-5 bg-stone-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-orange-600"></div>
               </label>
+            </div>
+          </div>
+
+          {/* Section 2B: Alphabet & Name Diary Differentiation Mode */}
+          <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 space-y-2.5">
+            <h4 className="font-bold text-stone-900 flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-orange-600" />
+              <span>अक्षर-दर-अक्षर पहचान सटीकता (Alphabet Differentiation):</span>
+            </h4>
+            <p className="text-[11px] text-stone-500">
+              तय करें कि क्या मिलता-जुलता नाम (जैसे वैशाली बनाम वैसाली / वैशारी) अलग रखा जाए।
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { val: 'STRICT', label: 'सख्त अक्षर', sub: 'श≠स, ल≠र (Exact)' },
+                { val: 'MODERATE', label: 'सामान्य', sub: 'मात्रा छूट' },
+                { val: 'LENIENT', label: 'लचीला', sub: 'उच्चारण मिलान' }
+              ].map(opt => (
+                <button
+                  key={opt.val}
+                  type="button"
+                  onClick={() => setFormData(prev => ({ ...prev, accentToleranceLevel: opt.val }))}
+                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                    (formData.accentToleranceLevel || 'STRICT') === opt.val
+                      ? 'border-orange-500 bg-orange-50 text-orange-950 font-bold shadow-2xs'
+                      : 'border-stone-200 bg-white text-stone-700 hover:border-stone-300'
+                  }`}
+                >
+                  <span className="block text-xs">{opt.label}</span>
+                  <span className="block text-[10px] text-stone-500 font-normal">{opt.sub}</span>
+                </button>
+              ))}
             </div>
           </div>
 

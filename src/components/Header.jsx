@@ -8,7 +8,8 @@ import {
   Languages, 
   Sparkles, 
   Receipt, 
-  Users 
+  Users,
+  BookOpen
 } from 'lucide-react';
 import { exportTransactionsToCSV } from '../utils/storage.js';
 
@@ -18,6 +19,7 @@ export default function Header({
   settings,
   onOpenSettings,
   onOpenRateCard,
+  onOpenNameDiary,
   onOpenLanguageModal,
   onOpenPdfReport,
   transactions = [],
@@ -144,6 +146,18 @@ export default function Header({
             <Languages className="w-3.5 h-3.5 text-orange-600" />
             <span className="text-[11px]">{isHindi ? 'हिन्दी' : 'English'}</span>
           </button>
+
+          {/* Name Diary / Dictionary */}
+          {onOpenNameDiary && (
+            <button
+              onClick={onOpenNameDiary}
+              className="px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 transition-colors flex items-center gap-1.5 text-xs font-bold cursor-pointer"
+              title="नाम डायरी व अक्षर शब्दकोश (Name Diary & Alphabet Dictionary)"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-amber-700" />
+              <span className="hidden lg:inline">{isHindi ? 'नाम डायरी' : 'Name Diary'}</span>
+            </button>
+          )}
 
           {/* Rate Card */}
           <button
